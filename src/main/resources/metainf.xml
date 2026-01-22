@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<SetIntegration set10-api-version="1.20.0" version="1.0.0"
+        xmlns="http://crystals.ru/set10/api/metainf"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://crystals.ru/set10/api/metainf metainf.xsd">
+
+    <!-- 
+        SBG Pay Payment Plugin
+        Интеграция с POS API v1 для QR-платежей
+        
+        Поддерживаемые провайдеры: Click, Payme, Uzum и другие
+    -->
+
+    <ExternalService serviceType="PAYMENT" localeKey="service.name" id="uz.sbgpay">
+        
+        <!-- Настройки подключения к API -->
+        <Options>
+            <!-- Base URL API -->
+            <URL key="sbgpay.baseUrl" 
+                 localeKey="option.baseUrl" 
+                 defaultValue="https://sbg.amasia.io/pos"/>
+            
+            <!-- Device Token для аутентификации -->
+            <String key="sbgpay.deviceToken" 
+                    localeKey="option.deviceToken"
+                    required="true"/>
+            
+            <!-- Язык (для переводов в API) -->
+            <String key="sbgpay.lang" 
+                    localeKey="option.lang" 
+                    defaultValue="ru"/>
+            
+            <!-- Валюта -->
+            <String key="sbgpay.currency" 
+                    localeKey="option.currency" 
+                    defaultValue="UZS"/>
+            
+            <!-- TTL платежа в секундах -->
+            <Integer key="sbgpay.ttlSeconds" 
+                     localeKey="option.ttlSeconds" 
+                     minValue="60" 
+                     maxValue="3600" 
+                     defaultValue="300"/>
+            
+            <!-- Интервал опроса статуса в мс -->
+            <Integer key="sbgpay.pollDelayMs" 
+                     localeKey="option.pollDelayMs" 
+                     minValue="500" 
+                     maxValue="10000" 
+                     defaultValue="2000"/>
+            
+            <!-- Таймаут ожидания оплаты в секундах -->
+            <Integer key="sbgpay.pollTimeoutSeconds" 
+                     localeKey="option.pollTimeoutSeconds" 
+                     minValue="60" 
+                     maxValue="7200" 
+                     defaultValue="420"/>
+            
+            <!-- Отправлять детали чека (receipt.items) -->
+            <Boolean key="sbgpay.sendReceipt" 
+                     localeKey="option.sendReceipt" 
+                     defaultValue="false"/>
+            
+            <!-- Шаблон URL для генерации QR (плейсхолдер {paymentId}) -->
+            <String key="sbgpay.qrUrlTemplate" 
+                    localeKey="option.qrUrlTemplate" 
+                    defaultValue="https://sbg.amasia.io/emulators/pay/{paymentId}"/>
+        </Options>
+
+        <!-- Плагин оплаты -->
+        <PaymentPlugin paymentType="ELECTRONIC" 
+                       localeKey="payment.name" 
+                       id="uz.sbgpay.payment">
+            
+            <Description>SBG Pay QR Payment Plugin - интеграция с Click, Payme, Uzum и др.</Description>
+
+            <!-- Сохраняемые поля платежа (видны в Опердне и выгружаются в ERP) -->
+            <PersistedField exportable="true" 
+                           visible="true" 
+                           key="sbgpay.paymentId" 
+                           localeKey="field.paymentId"/>
+            
+            <PersistedField exportable="true" 
+                           visible="true" 
+                           key="sbgpay.paymentCode" 
+                           localeKey="field.paymentCode"/>
+            
+            <PersistedField exportable="true" 
+                           visible="true" 
+                           key="sbgpay.methodId" 
+                           localeKey="field.methodId"/>
+            
+            <PersistedField exportable="true" 
+                           visible="true" 
+                           key="sbgpay.methodName" 
+                           localeKey="field.methodName"/>
+            
+            <PersistedField exportable="true" 
+                           visible="true" 
+                           key="sbgpay.status" 
+                           localeKey="field.status"/>
+
+        </PaymentPlugin>
+    </ExternalService>
+</SetIntegration>

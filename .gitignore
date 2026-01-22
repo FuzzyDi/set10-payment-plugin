@@ -1,0 +1,27 @@
+# Build output
+target/
+build/
+out/
+*.jar
+!lib/*.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+.project
+.classpath
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Package files
+*.zip
+*.tar.gz

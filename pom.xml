@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>uz.sbgpay</groupId>
+    <artifactId>SBGPayPaymentPlugin</artifactId>
+    <version>2.0.0</version>
+    <packaging>jar</packaging>
+    <name>SBG Pay Payment Plugin</name>
+    <description>QR Payment Plugin for Set Retail 10 - POS API v1 Integration</description>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.source>1.8</maven.compiler.source>
+        <maven.compiler.target>1.8</maven.compiler.target>
+        <maven.build.timestamp.format>yyyy-MM-dd HH:mm:ss</maven.build.timestamp.format>
+    </properties>
+
+    <dependencies>
+        <!-- Set Retail 10 API -->
+        <dependency>
+            <groupId>ru.crystals.setretail</groupId>
+            <artifactId>set10pos-api</artifactId>
+            <version>1.20.0</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/lib/set10pos-api-1.20.0.jar</systemPath>
+        </dependency>
+
+        <!-- SLF4J (provided by Set10) -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>1.7.36</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Jackson for JSON -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.13.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+            <version>2.13.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-annotations</artifactId>
+            <version>2.13.0</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Compiler -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.8.1</version>
+                <configuration>
+                    <source>1.8</source>
+                    <target>1.8</target>
+                    <encoding>UTF-8</encoding>
+                </configuration>
+            </plugin>
+
+            <!-- JAR with manifest -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.2.0</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+                            <addDefaultSpecificationEntries>true</addDefaultSpecificationEntries>
+                        </manifest>
+                        <manifestEntries>
+                            <Plugin-Id>uz.sbgpay.payment</Plugin-Id>
+                            <Plugin-Version>${project.version}</Plugin-Version>
+                            <Implementation-Version>${project.version}</Implementation-Version>
+                            <Build-Date>${maven.build.timestamp}</Build-Date>
+                            <Project>${project.name}</Project>
+                            <Implementation-Vendor>SBG (Soft Business Group)</Implementation-Vendor>
+                            <Vendor-URL>https://www.sbg.uz</Vendor-URL>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+
+            <!-- Assembly: JAR with dependencies -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-assembly-plugin</artifactId>
+                <version>3.3.0</version>
+                <configuration>
+                    <descriptorRefs>
+                        <descriptorRef>jar-with-dependencies</descriptorRef>
+                    </descriptorRefs>
+                    <archive>
+                        <manifest>
+                            <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+                            <addDefaultSpecificationEntries>true</addDefaultSpecificationEntries>
+                        </manifest>
+                        <manifestEntries>
+                            <Plugin-Id>uz.sbgpay.payment</Plugin-Id>
+                            <Plugin-Version>${project.version}</Plugin-Version>
+                            <Implementation-Version>${project.version}</Implementation-Version>
+                            <Build-Date>${maven.build.timestamp}</Build-Date>
+                            <Project>${project.name}</Project>
+                            <Implementation-Vendor>SBG (Soft Business Group)</Implementation-Vendor>
+                            <Vendor-URL>https://www.sbg.uz</Vendor-URL>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>make-assembly</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>single</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

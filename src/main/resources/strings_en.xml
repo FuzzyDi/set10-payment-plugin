@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE properties SYSTEM "http://java.sun.com/dtd/properties.dtd">
+<properties>
+
+    <!-- ==================== -->
+    <!-- Metainf names        -->
+    <!-- ==================== -->
+    
+    <entry key="service.name">SBG Pay (QR Payment)</entry>
+    <entry key="payment.name">Pay via SBG Pay</entry>
+
+    <!-- External service options -->
+    <entry key="option.baseUrl">POS API Server URL</entry>
+    <entry key="option.deviceToken">Device Token</entry>
+    <entry key="option.lang">Language (ru/uz/en)</entry>
+    <entry key="option.currency">Currency (UZS)</entry>
+    <entry key="option.ttlSeconds">Payment TTL (seconds)</entry>
+    <entry key="option.pollDelayMs">Status poll interval (ms)</entry>
+    <entry key="option.pollTimeoutSeconds">Payment timeout (seconds)</entry>
+    <entry key="option.sendReceipt">Send receipt details to API</entry>
+    <entry key="option.qrUrlTemplate">QR code URL template</entry>
+
+    <!-- Persisted fields -->
+    <entry key="field.paymentId">Payment ID</entry>
+    <entry key="field.paymentCode">Payment Code</entry>
+    <entry key="field.methodId">Payment Method</entry>
+    <entry key="field.methodName">Method Name</entry>
+    <entry key="field.status">Status</entry>
+
+    <!-- ==================== -->
+    <!-- Plugin strings       -->
+    <!-- ==================== -->
+
+    <!-- Loading methods -->
+    <entry key="loading.methods">Loading payment methods...</entry>
+    <entry key="error.no.methods">No payment methods available</entry>
+    <entry key="error.load.methods">Failed to load payment methods: </entry>
+
+    <!-- Method selection -->
+    <entry key="select.method">SBG Pay: Select payment method</entry>
+    <entry key="error.method.not.found">Payment method not found</entry>
+    <entry key="error.amount.too.small">Amount is below minimum: </entry>
+    <entry key="error.amount.too.large">Amount exceeds maximum: </entry>
+	<entry key="enter.sum.to.pay">Enter amount to pay</entry>
+
+    <!-- Creating payment -->
+    <entry key="creating.payment">Creating payment...</entry>
+    <entry key="preparing">Preparing...</entry>
+    <entry key="error.create.payment">Failed to create payment: </entry>
+
+    <!-- Waiting for payment -->
+    <entry key="waiting.payment">Waiting for payment...</entry>
+    <entry key="payment.code">Code: </entry>
+    <entry key="scan.qr">Scan QR code to pay</entry>
+    <entry key="amount">Amount: </entry>
+
+    <!-- Results -->
+    <entry key="payment.success">Payment successful!</entry>
+    <entry key="error.timeout">Payment timeout</entry>
+    <entry key="error.payment.failed">Payment failed: </entry>
+
+    <!-- Refund -->
+    <entry key="refund.not.supported">Refund via SBG Pay is not supported</entry>
+
+    <!-- HTTP errors -->
+    <entry key="error.unauthorized">Authorization error: check Device-Token</entry>
+    <entry key="error.rate.limit">Too many requests, please try later</entry>
+
+</properties>
