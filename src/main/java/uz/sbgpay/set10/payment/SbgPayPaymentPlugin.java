@@ -740,11 +740,77 @@ public class SbgPayPaymentPlugin implements PaymentPlugin {
             
             itemObj.put("qty", item.getQuantity() / 1000.0);
             itemObj.put("total", toMinorUnits(item.getSum()));
+            
+            // Добавляем единицу измерения
+            String unit = mapMeasureUnit(item);
+            itemObj.put("unit", unit);
+            
             items.add(itemObj);
         }
         
         receiptObj.put("items", items);
         return receiptObj;
+    }
+
+    /**
+     * Маппинг единицы измерения из Set Retail 10 в формат SBG Pay
+     */
+    private String mapMeasureUnit(LineItem item) {
+        // Пробуем получить код ОКЕИ
+        String rcumCode = item.getMeasureRcumCode();
+        if (rcumCode != null && !rcumCode.isEmpty()) {
+            switch (rcumCode) {
+                case "166": return "kg";   // килограмм
+                case "163": return "g";    // грамм
+                case "112": return "l";    // литр
+                case "006": return "m";    // метр
+                case "796": return "pcs";  // штуки
+                default: break;
+            }
+        }
+        
+        // Пробуем по названию единицы измерения
+        String measureName = item.getMeasureName();
+        if (measureName != null && !measureName.isEmpty()) {
+            String nameLower = measureName.toLowerCase().trim();
+            
+            // Килограмм
+            if (nameLower.equals("кг") || nameLower.equals("килограмм") || 
+                nameLower.equals("kg") || nameLower.equals("kilogram")) {
+                return "kg";
+            }
+            
+            // Грамм
+            if (nameLower.equals("г") || nameLower.equals("грамм") || 
+                nameLower.equals("g") || nameLower.equals("gr") || nameLower.equals("gram")) {
+                return "g";
+            }
+            
+            // Литр
+            if (nameLower.equals("л") || nameLower.equals("литр") || 
+                nameLower.equals("l") || nameLower.equals("liter") || nameLower.equals("litr")) {
+                return "l";
+            }
+            
+            // Метр
+            if (nameLower.equals("м") || nameLower.equals("метр") || 
+                nameLower.equals("m") || nameLower.equals("meter") || nameLower.equals("metr")) {
+                return "m";
+            }
+            
+            // Штуки (русский, узбекский кириллица, узбекский латиница, английский)
+            if (nameLower.equals("шт") || nameLower.equals("штука") || nameLower.equals("штуки") ||
+                nameLower.equals("дона") ||                          // узбекский кириллица
+                nameLower.equals("dona") ||                          // узбекский латиница
+                nameLower.equals("pcs") || nameLower.equals("piece") || nameLower.equals("pieces")) {
+                return "pcs";
+            }
+        }
+        
+        // По умолчанию — штуки
+        log.debug("[SBGPay] Unknown measure unit: rcumCode={}, measureName={}, defaulting to 'pcs'", 
+            rcumCode, measureName);
+        return "pcs";
     }
 
     // ====================
