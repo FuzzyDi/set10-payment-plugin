@@ -15,6 +15,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +40,7 @@ import ru.crystals.pos.spi.annotation.Inject;
 import ru.crystals.pos.spi.annotation.POSPlugin;
 import ru.crystals.pos.spi.equipment.CustomerDisplay;
 import ru.crystals.pos.spi.equipment.CustomerDisplayMessage;
+import ru.crystals.pos.spi.feedback.Feedback;
 import ru.crystals.pos.spi.plugin.payment.CancelRequest;
 import ru.crystals.pos.spi.plugin.payment.InvalidPaymentException;
 import ru.crystals.pos.spi.plugin.payment.PaymentCallback;
@@ -46,6 +48,7 @@ import ru.crystals.pos.spi.plugin.payment.PaymentRequest;
 import ru.crystals.pos.spi.plugin.payment.RefundRequest;
 import ru.crystals.pos.spi.receipt.LineItem;
 import ru.crystals.pos.spi.receipt.Merchandise;
+import ru.crystals.pos.spi.receipt.ProcessedPayment;
 import ru.crystals.pos.spi.receipt.Receipt;
 import ru.crystals.pos.spi.ui.UIForms;
 import ru.crystals.pos.spi.ui.payment.SumToPayFormParameters;
@@ -57,6 +60,7 @@ import ru.crystals.pos.spi.ui.payment.SumToPayFormParameters;
  * - GET /api/v1/payment-methods — получение методов оплаты
  * - POST /api/v1/payments — создание платежа
  * - GET /api/v1/payments/{id}/status — опрос статуса
+ * - POST /api/v1/payments/{id}/complete — подтверждение платежа после фискализации
  * - POST /api/v1/payments/{id}/cancel — отмена платежа
  * 
  * Флоу:
@@ -68,7 +72,8 @@ import ru.crystals.pos.spi.ui.payment.SumToPayFormParameters;
  * 6. QR отображается на дисплее покупателя
  * 7. Покупатель сканирует и оплачивает
  * 8. Плагин опрашивает статус до completed/failed
- * 9. Чек закрывается
+ * 9. Чек фискализируется
+ * 10. Плагин отправляет подтверждение /complete
  */
 @POSPlugin(id = "uz.sbgpay.payment")
 public class SbgPayPaymentPlugin implements PaymentPlugin {
@@ -204,12 +209,13 @@ public class SbgPayPaymentPlugin implements PaymentPlugin {
         clearCustomerDisplay();
 
         if (currentPaymentId != null) {
+            final String paymentIdToCancel = currentPaymentId;
             new Thread(() -> {
                 try {
-                    cancelPaymentOnServer(currentPaymentId);
-                    log.info("[SBGPay] Payment cancelled on server");
+                    cancelPaymentOnServer(paymentIdToCancel);
+                    log.info("[SBGPay] Payment cancelled on server: {}", paymentIdToCancel);
                 } catch (Exception e) {
-                    log.warn("[SBGPay] Cancel request failed: {}", e.getMessage());
+                    log.warn("[SBGPay] Cancel request failed for {}: {}", paymentIdToCancel, e.getMessage());
                 }
             }, "sbgpay-cancel").start();
         }
@@ -236,6 +242,119 @@ public class SbgPayPaymentPlugin implements PaymentPlugin {
         } catch (IncorrectStateException e) {
             request.getPaymentCallback().paymentNotCompleted();
         }
+    }
+
+    // ====================
+    // FISCALIZATION EVENTS
+    // ====================
+
+    /**
+     * Вызывается после фискализации чека.
+     * Отправляет подтверждение оплаты (/complete) на сервер SBG Pay.
+     */
+    @Override
+    public Feedback eventReceiptFiscalized(Receipt receipt, boolean isCancelReceipt) {
+        loadConfiguration();
+        
+        if (receipt == null) {
+            log.debug("[SBGPay] eventReceiptFiscalized: receipt is null");
+            return null;
+        }
+        
+        if (isCancelReceipt) {
+            log.debug("[SBGPay] eventReceiptFiscalized: cancel receipt, skipping complete");
+            return null;
+        }
+        
+        log.info("[SBGPay] ===== RECEIPT FISCALIZED =====");
+        
+        Collection<ProcessedPayment> payments = receipt.getPayments();
+        if (payments == null || payments.isEmpty()) {
+            log.debug("[SBGPay] eventReceiptFiscalized: no payments in receipt");
+            return null;
+        }
+        
+        // Собираем все paymentId от SBG Pay
+        List<String> sbgPaymentIds = new ArrayList<>();
+        for (ProcessedPayment payment : payments) {
+            Map<String, String> data = payment.getData();
+			if (data != null) {
+				String paymentId = data.get("sbgpay.paymentId");
+				if (paymentId != null && !paymentId.isEmpty()) {
+					sbgPaymentIds.add(paymentId);
+				}
+			}
+        }
+        
+        if (sbgPaymentIds.isEmpty()) {
+            log.debug("[SBGPay] eventReceiptFiscalized: no SBG Pay payments found");
+            return null;
+        }
+        
+        log.info("[SBGPay] Found {} SBG Pay payment(s) to complete", sbgPaymentIds.size());
+        
+        // Пытаемся отправить /complete для каждого платежа
+        List<String> failedPaymentIds = new ArrayList<>();
+        for (String paymentId : sbgPaymentIds) {
+            try {
+                completePaymentOnServer(paymentId);
+                log.info("[SBGPay] Complete successful for paymentId={}", paymentId);
+            } catch (Exception e) {
+                log.warn("[SBGPay] Complete failed for paymentId={}: {}", paymentId, e.getMessage());
+                failedPaymentIds.add(paymentId);
+            }
+        }
+        
+        if (failedPaymentIds.isEmpty()) {
+            log.info("[SBGPay] All payments completed successfully");
+            return null;
+        }
+        
+        // Возвращаем Feedback для повторной отправки
+        log.warn("[SBGPay] {} payment(s) failed to complete, scheduling retry", failedPaymentIds.size());
+        String payload = String.join(",", failedPaymentIds);
+        return new Feedback(payload);
+    }
+
+    /**
+     * Повторная попытка отправить /complete для платежей, которые не удалось подтвердить.
+     */
+    @Override
+    public void onRepeatSend(Feedback feedback) throws Exception {
+        if (feedback == null || feedback.getPayload() == null || feedback.getPayload().isEmpty()) {
+            return;
+        }
+        
+        loadConfiguration();
+        
+        String payload = feedback.getPayload();
+        String[] paymentIds = payload.split(",");
+        
+        log.info("[SBGPay] onRepeatSend: retrying {} payment(s)", paymentIds.length);
+        
+        List<String> stillFailed = new ArrayList<>();
+        for (String paymentId : paymentIds) {
+            if (paymentId == null || paymentId.trim().isEmpty()) {
+                continue;
+            }
+            paymentId = paymentId.trim();
+            
+            try {
+                completePaymentOnServer(paymentId);
+                log.info("[SBGPay] Complete retry successful for paymentId={}", paymentId);
+            } catch (Exception e) {
+                log.warn("[SBGPay] Complete retry failed for paymentId={}: {}", paymentId, e.getMessage());
+                stillFailed.add(paymentId);
+            }
+        }
+        
+        if (!stillFailed.isEmpty()) {
+            // Обновляем payload только с неудавшимися
+            feedback.setPayload(String.join(",", stillFailed));
+            throw new Exception("Failed to complete " + stillFailed.size() + " payment(s): " + stillFailed);
+        }
+        
+        log.info("[SBGPay] All retried payments completed successfully");
     }
 
     // ====================
@@ -477,7 +596,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin {
                 if (isSuccessStatus(status.status)) {
                     log.info("[SBGPay] Payment completed successfully");
                     stopStatusPolling();
-                    SwingUtilities.invokeLater(() -> completePayment(callback, amount, status));
+                    SwingUtilities.invokeLater(() -> completePaymentFlow(callback, amount, status));
                     
                 } else if (isFailedStatus(status.status)) {
                     String errorDetail = (status.errorMessage != null && !status.errorMessage.isEmpty()) 
@@ -506,9 +625,10 @@ public class SbgPayPaymentPlugin implements PaymentPlugin {
     }
 
     /**
-     * Завершает платёж успешно
+     * Завершает процесс оплаты — передаёт данные кассе.
+     * Подтверждение /complete будет отправлено в eventReceiptFiscalized после фискализации.
      */
-    private void completePayment(PaymentCallback callback, BigDecimal amount, PaymentStatus status) {
+    private void completePaymentFlow(PaymentCallback callback, BigDecimal amount, PaymentStatus status) {
         paymentInProgress = false;
 
         String title = (currentMethodName != null && !currentMethodName.isEmpty()) 
@@ -521,13 +641,14 @@ public class SbgPayPaymentPlugin implements PaymentPlugin {
         Payment payment = new Payment();
         payment.setSum(amount);
         
+        // Сохраняем данные для использования в eventReceiptFiscalized
         payment.getData().put("sbgpay.paymentId", nullToEmpty(currentPaymentId));
         payment.getData().put("sbgpay.paymentCode", nullToEmpty(currentPaymentCode));
         payment.getData().put("sbgpay.methodId", nullToEmpty(currentMethodId));
         payment.getData().put("sbgpay.methodName", nullToEmpty(currentMethodName));
         payment.getData().put("sbgpay.status", nullToEmpty(status.status));
 
-        log.info("[SBGPay] ===== PAYMENT COMPLETED =====");
+        log.info("[SBGPay] ===== PAYMENT FLOW COMPLETED =====");
         log.info("[SBGPay] paymentId={}, method={}, status={}, amount={}", 
             currentPaymentId, currentMethodName, status.status, amount);
 
@@ -702,11 +823,21 @@ public class SbgPayPaymentPlugin implements PaymentPlugin {
     }
 
     /**
+     * POST /api/v1/payments/{id}/complete
+     */
+    private void completePaymentOnServer(String paymentId) throws Exception {
+        String url = baseUrl + "/api/v1/payments/" + urlEncode(paymentId) + "/complete";
+        httpPost(url, new LinkedHashMap<>(), UUID.randomUUID().toString());
+        log.debug("[SBGPay] Complete request sent for paymentId={}", paymentId);
+    }
+
+    /**
      * POST /api/v1/payments/{id}/cancel
      */
     private void cancelPaymentOnServer(String paymentId) throws Exception {
         String url = baseUrl + "/api/v1/payments/" + urlEncode(paymentId) + "/cancel";
         httpPost(url, new LinkedHashMap<>(), UUID.randomUUID().toString());
+        log.debug("[SBGPay] Cancel request sent for paymentId={}", paymentId);
     }
 
     /**

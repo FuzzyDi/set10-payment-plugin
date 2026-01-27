@@ -55,7 +55,10 @@
     <entry key="amount">К оплате: </entry>
 
     <!-- Результаты -->
+    <entry key="payment.confirming">Подтверждение...</entry>
     <entry key="payment.success">Оплата успешна!</entry>
+    <entry key="payment.confirm.error">Ошибка подтверждения</entry>
+    <entry key="error.confirm.payment">Ошибка подтверждения платежа: </entry>
     <entry key="error.timeout">Время ожидания оплаты истекло</entry>
     <entry key="error.payment.failed">Оплата не выполнена: </entry>
 

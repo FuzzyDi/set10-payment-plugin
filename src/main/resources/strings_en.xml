@@ -55,7 +55,10 @@
     <entry key="amount">Amount: </entry>
 
     <!-- Results -->
+    <entry key="payment.confirming">Confirming...</entry>
     <entry key="payment.success">Payment successful!</entry>
+    <entry key="payment.confirm.error">Confirmation error</entry>
+    <entry key="error.confirm.payment">Failed to confirm payment: </entry>
     <entry key="error.timeout">Payment timeout</entry>
     <entry key="error.payment.failed">Payment failed: </entry>
 
