@@ -18,6 +18,9 @@
         <maven.build.timestamp.format>dd.MM.yyyy HH:mm:ss</maven.build.timestamp.format>
         <build.machine>${env.COMPUTERNAME}</build.machine>
         <vendor.email>support@sbgpay.uz</vendor.email>
+        <checkstyle.plugin.version>3.3.1</checkstyle.plugin.version>
+        <pmd.plugin.version>3.21.2</pmd.plugin.version>
+        <spotbugs.plugin.version>4.8.6.2</spotbugs.plugin.version>
     </properties>
 
     <dependencies>
@@ -170,4 +173,148 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- Soft mode: generates reports and does not fail the build -->
+        <profile>
+            <id>static-analysis-report</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-checkstyle-plugin</artifactId>
+                        <version>${checkstyle.plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>checkstyle-report</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>checkstyle</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                        <configuration>
+                            <outputFile>${project.build.directory}/checkstyle-result.xml</outputFile>
+                            <consoleOutput>true</consoleOutput>
+                            <failsOnError>false</failsOnError>
+                            <failOnViolation>false</failOnViolation>
+                            <linkXRef>false</linkXRef>
+                        </configuration>
+                    </plugin>
+
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-pmd-plugin</artifactId>
+                        <version>${pmd.plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>pmd-report</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>pmd</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                        <configuration>
+                            <targetJdk>1.8</targetJdk>
+                            <failOnViolation>false</failOnViolation>
+                            <linkXRef>false</linkXRef>
+                        </configuration>
+                    </plugin>
+
+                    <plugin>
+                        <groupId>com.github.spotbugs</groupId>
+                        <artifactId>spotbugs-maven-plugin</artifactId>
+                        <version>${spotbugs.plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>spotbugs-report</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>spotbugs</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                        <configuration>
+                            <effort>Max</effort>
+                            <threshold>Low</threshold>
+                            <failOnError>false</failOnError>
+                            <xmlOutput>true</xmlOutput>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!-- Strict mode: fails the build when any violation is found -->
+        <profile>
+            <id>static-analysis</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-checkstyle-plugin</artifactId>
+                        <version>${checkstyle.plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>checkstyle-gate</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>check</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                        <configuration>
+                            <outputFile>${project.build.directory}/checkstyle-result.xml</outputFile>
+                            <consoleOutput>true</consoleOutput>
+                            <failsOnError>true</failsOnError>
+                            <failOnViolation>true</failOnViolation>
+                            <linkXRef>false</linkXRef>
+                        </configuration>
+                    </plugin>
+
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-pmd-plugin</artifactId>
+                        <version>${pmd.plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>pmd-gate</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>check</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                        <configuration>
+                            <targetJdk>1.8</targetJdk>
+                            <failOnViolation>true</failOnViolation>
+                            <linkXRef>false</linkXRef>
+                        </configuration>
+                    </plugin>
+
+                    <plugin>
+                        <groupId>com.github.spotbugs</groupId>
+                        <artifactId>spotbugs-maven-plugin</artifactId>
+                        <version>${spotbugs.plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>spotbugs-gate</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>check</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                        <configuration>
+                            <effort>Max</effort>
+                            <threshold>Low</threshold>
+                            <failOnError>true</failOnError>
+                            <xmlOutput>true</xmlOutput>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
