@@ -320,7 +320,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 log.info("[SBGPay] Reversal accepted: sourcePaymentId={}, status={}", sourcePaymentIdFinal, initialStatus);
 
                 if (isRefundFailedStatus(initialStatus)) {
-                    String detail = (initialResponse.errorMessage != null && !initialResponse.errorMessage.isEmpty())
+                    String detail = initialResponse.errorMessage != null && !initialResponse.errorMessage.isEmpty()
                         ? initialResponse.errorMessage
                         : initialStatus;
                     log.warn("[SBGPay] Reversal failed: sourcePaymentId={}, status={}, error={}",
@@ -340,7 +340,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 }
 
                 if (isRefundFailedStatus(terminalResponse.status)) {
-                    String detail = (terminalResponse.errorMessage != null && !terminalResponse.errorMessage.isEmpty())
+                    String detail = terminalResponse.errorMessage != null && !terminalResponse.errorMessage.isEmpty()
                         ? terminalResponse.errorMessage
                         : terminalResponse.status;
                     log.warn("[SBGPay] Refund failed: sourcePaymentId={}, status={}, error={}",
@@ -661,7 +661,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                                       Receipt receipt,
                                       BigDecimal defaultSum) {
         
-        String title = (method.name != null && !method.name.isEmpty()) 
+        String title = method.name != null && !method.name.isEmpty()
             ? method.name 
             : getString("payment.name", "SBG Pay");
 
@@ -832,7 +832,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 PaymentStatus status = fetchPaymentStatus(currentPaymentId, statusRequestTimeoutMs);
                 String qrData = getQrData(status);
                 log.debug("[SBGPay] Status poll: status={}, hasQrData={}, elapsed={}ms, remaining={}ms, requestTimeout={}ms",
-                    status.status, (qrData != null && !qrData.isEmpty()), elapsed, remainingMs, statusRequestTimeoutMs);
+                    status.status, qrData != null && !qrData.isEmpty(), elapsed, remainingMs, statusRequestTimeoutMs);
 
                 if (!qrDisplayed && qrData != null && !qrData.isEmpty()) {
                     qrDisplayed = true;
@@ -847,7 +847,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                     SwingUtilities.invokeLater(() -> completePaymentFlow(callback, amount, status));
                     
                 } else if (isFailedStatus(status.status)) {
-                    String errorDetail = (status.errorMessage != null && !status.errorMessage.isEmpty()) 
+                    String errorDetail = status.errorMessage != null && !status.errorMessage.isEmpty()
                         ? status.errorMessage 
                         : status.status;
                     log.warn("[SBGPay] Payment failed: status={}, error={}", status.status, status.errorMessage);
@@ -915,7 +915,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     private void completePaymentFlow(PaymentCallback callback, BigDecimal amount, PaymentStatus status) {
         paymentInProgress = false;
 
-        String title = (currentMethodName != null && !currentMethodName.isEmpty()) 
+        String title = currentMethodName != null && !currentMethodName.isEmpty()
             ? currentMethodName 
             : "SBG Pay";
         String completedPaymentId = resolveCompletedPaymentId(status);
@@ -1444,7 +1444,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         log.info("[SBGPay] Reversal accepted: sourcePaymentId={}, status={}", sourcePaymentId, initialStatus);
 
         if (isRefundFailedStatus(initialStatus)) {
-            String detail = (initialResponse.errorMessage != null && !initialResponse.errorMessage.isEmpty())
+            String detail = initialResponse.errorMessage != null && !initialResponse.errorMessage.isEmpty()
                 ? initialResponse.errorMessage
                 : initialStatus;
             throw new Exception(detail);
@@ -1455,7 +1455,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
             : waitForRefundTerminalStatus(sourcePaymentId);
 
         if (isRefundFailedStatus(terminalResponse.status)) {
-            String detail = (terminalResponse.errorMessage != null && !terminalResponse.errorMessage.isEmpty())
+            String detail = terminalResponse.errorMessage != null && !terminalResponse.errorMessage.isEmpty()
                 ? terminalResponse.errorMessage
                 : terminalResponse.status;
             throw new Exception(detail);
@@ -1487,7 +1487,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 itemObj.put("sku", nullToEmpty(merchandise.getMarking()));
                 
                 String barcode = merchandise.getBarcode();
-                itemObj.put("barcode", (barcode != null && !barcode.isEmpty()) ? barcode : null);
+                itemObj.put("barcode", barcode != null && !barcode.isEmpty() ? barcode : null);
                 
                 itemObj.put("price", toMinorUnits(merchandise.getPrice()));
             } else {
@@ -1749,7 +1749,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         private final String detail;
 
         private HttpStatusException(int status, String title, String detail) {
-            super(detail != null ? detail : ("HTTP " + status));
+            super(detail != null ? detail : "HTTP " + status);
             this.status = status;
             this.title = title;
             this.detail = detail;
@@ -1773,7 +1773,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         try {
             boolean canShowQr = customerDisplay.canShowQr();
             
-            String title = (currentMethodName != null && !currentMethodName.isEmpty()) 
+            String title = currentMethodName != null && !currentMethodName.isEmpty()
                 ? currentMethodName 
                 : "SBG Pay";
             
@@ -1912,9 +1912,11 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
 
         String resolved = hasText(serviceRaw)
             ? serviceRaw.trim()
-            : (hasText(pluginRaw) ? pluginRaw.trim() : defaultValue);
+            : hasText(pluginRaw) ? pluginRaw.trim() : defaultValue;
 
-        String source = hasText(serviceRaw) ? "service" : (hasText(pluginRaw) ? "plugin" : "default");
+        String source = hasText(serviceRaw)
+            ? "service"
+            : hasText(pluginRaw) ? "plugin" : "default";
         if (verboseDebug && log.isTraceEnabled()) {
             log.trace("[SBGPay] String option '{}': serviceRaw={}, pluginRaw={}, resolved={}, source={}",
                 key, rawForLog(serviceRaw), rawForLog(pluginRaw), rawForLog(resolved), source);
@@ -1989,7 +1991,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 safeGetIntWithDefaultMarker(pluginProps, key, Integer.MIN_VALUE));
 
         Integer resolved = serviceInt != null ? serviceInt : pluginInt;
-        String source = serviceInt != null ? "service" : (pluginInt != null ? "plugin" : "default");
+        String source = serviceInt != null ? "service" : pluginInt != null ? "plugin" : "default";
 
         if (serviceParsed == null && serviceRaw != null && !serviceRaw.trim().isEmpty()) {
             logWarnSafe("[SBGPay] Invalid numeric config in service '{}'='{}'", key, serviceRaw);
