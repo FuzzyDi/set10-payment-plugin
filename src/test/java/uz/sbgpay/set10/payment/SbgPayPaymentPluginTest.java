@@ -111,12 +111,12 @@ class SbgPayPaymentPluginTest {
         Object plugin = newPlugin();
         Method parse = method("parseBooleanConfigValue", String.class);
 
-        assertEquals(Boolean.TRUE, parse.invoke(plugin, "true"));
-        assertEquals(Boolean.TRUE, parse.invoke(plugin, "1"));
-        assertEquals(Boolean.TRUE, parse.invoke(plugin, "on"));
-        assertEquals(Boolean.FALSE, parse.invoke(plugin, "false"));
-        assertEquals(Boolean.FALSE, parse.invoke(plugin, "0"));
-        assertEquals(Boolean.FALSE, parse.invoke(plugin, "off"));
+        assertEquals(Integer.valueOf(1), parse.invoke(plugin, "true"));
+        assertEquals(Integer.valueOf(1), parse.invoke(plugin, "1"));
+        assertEquals(Integer.valueOf(1), parse.invoke(plugin, "on"));
+        assertEquals(Integer.valueOf(0), parse.invoke(plugin, "false"));
+        assertEquals(Integer.valueOf(0), parse.invoke(plugin, "0"));
+        assertEquals(Integer.valueOf(0), parse.invoke(plugin, "off"));
     }
 
     @Test
