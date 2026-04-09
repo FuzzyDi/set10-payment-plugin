@@ -36,7 +36,7 @@
 - Реализовано сохранение полей платежа в чек:
   - `sbgpay.paymentId`, `sbgpay.paymentCode`, `sbgpay.methodId`, `sbgpay.methodName`, `sbgpay.status`.
 - Реализована локализация UI-строк:
-  - `ru`, `en`.
+  - `ru`, `en`, `uz`.
 - Есть сборка JAR и fat-JAR через Maven.
 - Базовые таймауты и обработка HTTP-ошибок присутствуют.
 

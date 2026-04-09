@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE properties SYSTEM "http://java.sun.com/dtd/properties.dtd">
+<properties>
+
+    <!-- ==================== -->
+    <!-- Metainf nomlari      -->
+    <!-- ==================== -->
+
+    <entry key="service.name">SBG Pay (QR-to'lov)</entry>
+    <entry key="payment.name">SBG Pay orqali to'lov</entry>
+
+    <!-- Tashqi tizim sozlamalari -->
+    <entry key="option.baseUrl">POS API server manzili</entry>
+    <entry key="option.deviceToken">Qurilma tokeni (Device-Token)</entry>
+    <entry key="option.lang">Til (ru/uz/en)</entry>
+    <entry key="option.currency">Valyuta (UZS)</entry>
+    <entry key="option.ttlSeconds">To'lovning amal qilish vaqti (soniya)</entry>
+    <entry key="option.pollDelayMs">Status so'rovi oralig'i (ms)</entry>
+    <entry key="option.pollTimeoutSeconds">To'lovni kutish taymauti (soniya)</entry>
+    <entry key="option.sendReceipt">Chek tafsilotlarini API ga yuborish</entry>
+
+    <!-- Saqlanadigan maydonlar -->
+    <entry key="field.paymentId">To'lov ID</entry>
+    <entry key="field.paymentCode">To'lov kodi</entry>
+    <entry key="field.methodId">To'lov usuli</entry>
+    <entry key="field.methodName">Usul nomi</entry>
+    <entry key="field.status">Holat</entry>
+    <entry key="field.sourcePaymentId">Manba to'lov ID</entry>
+    <entry key="field.refundId">Qaytarish ID</entry>
+    <entry key="field.refundCode">Qaytarish kodi</entry>
+    <entry key="field.refundStatus">Qaytarish holati</entry>
+
+    <!-- ==================== -->
+    <!-- Plugin matnlari      -->
+    <!-- ==================== -->
+
+    <!-- Usullarni yuklash -->
+    <entry key="loading.methods">To'lov usullari yuklanmoqda...</entry>
+    <entry key="error.no.methods">Mavjud to'lov usullari topilmadi</entry>
+    <entry key="error.load.methods">To'lov usullarini yuklashda xatolik: </entry>
+
+    <!-- Usul tanlash -->
+    <entry key="select.method">SBG Pay: to'lov usulini tanlang</entry>
+    <entry key="error.method.not.found">To'lov usuli topilmadi</entry>
+    <entry key="error.amount.too.small">Summa minimal qiymatdan kichik: </entry>
+    <entry key="error.amount.too.large">Summa maksimal qiymatdan katta: </entry>
+    <entry key="enter.sum.to.pay">To'lov summasini kiriting</entry>
+
+    <!-- To'lov yaratish -->
+    <entry key="creating.payment">To'lov yaratilmoqda...</entry>
+    <entry key="preparing">Tayyorlanmoqda...</entry>
+    <entry key="error.create.payment">To'lov yaratishda xatolik: </entry>
+
+    <!-- To'lovni kutish -->
+    <entry key="waiting.payment">To'lov kutilmoqda...</entry>
+    <entry key="payment.code">Kod: </entry>
+    <entry key="scan.qr">To'lov uchun QR kodni skaner qiling</entry>
+    <entry key="amount">To'lov summasi: </entry>
+
+    <!-- Natijalar -->
+    <entry key="payment.success">To'lov muvaffaqiyatli!</entry>
+    <entry key="error.timeout">To'lovni kutish vaqti tugadi</entry>
+    <entry key="error.payment.failed">To'lov bajarilmadi: </entry>
+
+    <!-- Qaytarish -->
+    <entry key="refund.creating">Qaytarish yaratilmoqda...</entry>
+    <entry key="refund.success">Qaytarish bajarildi</entry>
+    <entry key="refund.failed">Qaytarish bajarilmadi: </entry>
+    <entry key="refund.create.error">Qaytarishni yaratishda xatolik: </entry>
+    <entry key="refund.source.missing">Qaytarish uchun manba paymentId topilmadi</entry>
+    <entry key="refund.amount.invalid">Noto'g'ri qaytarish summasi</entry>
+    <entry key="refund.partial.not.supported">Qisman qaytarish qo'llab-quvvatlanmaydi: SBG reversal faqat dastlabki to'lovning to'liq summasini qabul qiladi</entry>
+
+    <!-- HTTP xatolari -->
+    <entry key="error.unauthorized">Avtorizatsiya xatosi: Device-Token ni tekshiring</entry>
+    <entry key="error.rate.limit">So'rovlar soni juda ko'p, keyinroq urinib ko'ring</entry>
+
+    <entry key="error.communication">Protsessing bilan aloqa yo'q. Tarmoqni tekshirib, qayta urinib ko'ring.</entry>
+    <entry key="error.processing.timeout">Protsessing javobini kutish vaqti oshdi. Amaliyotni qayta urinib ko'ring.</entry>
+    <entry key="error.unknown">Noma'lum xatolik</entry>
+</properties>

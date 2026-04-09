@@ -8,7 +8,7 @@
 - Отображение QR-кода на дисплее покупателя (CustomerDisplay)
 - Автоматический опрос статуса платежа
 - Передача состава чека (опционально)
-- Поддержка локализации (ru/en)
+- Поддержка локализации (ru/en/uz)
 
 ## Требования
 
@@ -115,7 +115,8 @@ SBGPayPluginV2/
     └── resources/
         ├── metainf.xml
         ├── strings_ru.xml
-        └── strings_en.xml
+        ├── strings_en.xml
+        └── strings_uz.xml
 ```
 
 ## Лицензия
