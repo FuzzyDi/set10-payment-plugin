@@ -21,6 +21,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -90,10 +92,16 @@ import ru.crystals.pos.spi.ui.payment.SumToPayFormParameters;
 public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlugin, TransactionalRefundPlugin {
 
     private static final int DEFAULT_HTTP_TIMEOUT_MS = 30000;
+    private static final long REFUND_FAILED_RECHECK_WINDOW_MS = 20000L;
+    private static final long CANCEL_RESULT_CACHE_TTL_MS = 15000L;
     private static final AtomicReference<String> LAST_CONFIG_SNAPSHOT =
         new AtomicReference<>();
     private static final AtomicReference<String> LAST_AVAILABILITY_SNAPSHOT =
         new AtomicReference<>();
+    private static final ConcurrentHashMap<String, CancelOperationInFlight>
+        CANCEL_OPERATIONS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, CancelOperationResult>
+        RECENT_CANCEL_RESULTS = new ConcurrentHashMap<>();
 
     // ====================
     // Р ВР СњР Р„Р вЂўР С™Р В¦Р ВР В Set API
@@ -991,6 +999,41 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         }
     }
 
+    private CancelOperationResult getFreshCancelResult(String paymentId) {
+        CancelOperationResult result = RECENT_CANCEL_RESULTS.get(paymentId);
+        if (result == null) {
+            return null;
+        }
+
+        long ageMs = System.currentTimeMillis() - result.finishedAtMs;
+        if (ageMs <= CANCEL_RESULT_CACHE_TTL_MS) {
+            return result;
+        }
+
+        RECENT_CANCEL_RESULTS.remove(paymentId, result);
+        return null;
+    }
+
+    private CancelOperationHandle acquireCancelOperation(String paymentId) {
+        CancelOperationInFlight newOperation = new CancelOperationInFlight();
+        CancelOperationInFlight existing = CANCEL_OPERATIONS.putIfAbsent(
+            paymentId,
+            newOperation
+        );
+        if (existing == null) {
+            return new CancelOperationHandle(newOperation, true);
+        }
+        return new CancelOperationHandle(existing, false);
+    }
+
+    private void completeCancelOperation(String paymentId,
+                                         CancelOperationInFlight inFlight,
+                                         CancelOperationResult result) {
+        RECENT_CANCEL_RESULTS.put(paymentId, result);
+        inFlight.future.complete(result);
+        CANCEL_OPERATIONS.remove(paymentId, inFlight);
+    }
+
     private RefundResponse reversePaymentOnServer(String sourcePaymentId) throws Exception {
         String url = baseUrl + "/api/v1/payments/" + urlEncode(sourcePaymentId) + "/reversal";
 
@@ -1055,12 +1098,16 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
             log.debug("[SBGPay] Refund status poll: paymentId={}, status={}, elapsed={}ms, remaining={}ms, requestTimeout={}ms",
                 paymentId, lastStatus, elapsed, remainingMs, requestTimeoutMs);
 
-            if (isRefundSuccessStatus(lastStatus) || isRefundFailedStatus(lastStatus)) {
-                RefundResponse terminal = new RefundResponse();
-                terminal.refundId = paymentId;
-                terminal.status = lastStatus;
-                terminal.errorMessage = paymentStatus.errorMessage;
-                return terminal;
+            if (isRefundSuccessStatus(lastStatus)) {
+                return toRefundResponse(paymentId, paymentStatus);
+            }
+            if (isRefundFailedStatus(lastStatus)) {
+                return reconcileRefundFailedStatus(
+                    paymentId,
+                    paymentStatus,
+                    startTime,
+                    timeoutMs
+                );
             }
 
             try {
@@ -1072,18 +1119,102 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         }
     }
 
+    private RefundResponse toRefundResponse(String paymentId, PaymentStatus status) {
+        RefundResponse terminal = new RefundResponse();
+        terminal.refundId = paymentId;
+        terminal.status = status != null ? status.status : null;
+        terminal.errorMessage = status != null ? status.errorMessage : null;
+        return terminal;
+    }
+
+    private RefundResponse reconcileRefundFailedStatus(String paymentId,
+                                                       PaymentStatus initialFailedStatus,
+                                                       long flowStartTimeMs,
+                                                       long flowTimeoutMs) throws Exception {
+        RefundResponse latestFailed = toRefundResponse(paymentId, initialFailedStatus);
+        long reconcileDeadlineMs = Math.min(
+            System.currentTimeMillis() + REFUND_FAILED_RECHECK_WINDOW_MS,
+            flowStartTimeMs + flowTimeoutMs
+        );
+
+        log.warn(
+            "[SBGPay] Refund reached status=refund_failed, "
+                + "starting reconciliation: paymentId={}, window={}ms",
+            paymentId,
+            Math.max(0L, reconcileDeadlineMs - System.currentTimeMillis())
+        );
+
+        while (System.currentTimeMillis() < reconcileDeadlineMs) {
+            long sleepMs = Math.min(
+                Math.max(200L, pollDelayMs),
+                Math.max(1L, reconcileDeadlineMs - System.currentTimeMillis())
+            );
+
+            try {
+                Thread.sleep(sleepMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new Exception("Refund polling interrupted");
+            }
+
+            long elapsed = System.currentTimeMillis() - flowStartTimeMs;
+            long remainingMs = flowTimeoutMs - elapsed;
+            if (remainingMs <= 0) {
+                break;
+            }
+
+            int requestTimeoutMs = calculateStatusRequestTimeoutMs(remainingMs);
+            try {
+                PaymentStatus recheckedStatus = fetchPaymentStatus(
+                    paymentId,
+                    requestTimeoutMs
+                );
+                String status = recheckedStatus.status;
+                log.debug(
+                    "[SBGPay] Refund reconcile poll: paymentId={}, status={}, elapsed={}ms, "
+                        + "remaining={}ms, requestTimeout={}ms",
+                    paymentId,
+                    status,
+                    elapsed,
+                    remainingMs,
+                    requestTimeoutMs
+                );
+
+                if (isRefundSuccessStatus(status)) {
+                    log.info(
+                        "[SBGPay] Refund reconciliation succeeded: "
+                            + "paymentId={}, status={}",
+                        paymentId,
+                        status
+                    );
+                    return toRefundResponse(paymentId, recheckedStatus);
+                }
+
+                if (isRefundFailedStatus(status)) {
+                    latestFailed = toRefundResponse(paymentId, recheckedStatus);
+                }
+            } catch (Exception e) {
+                log.warn(
+                    "[SBGPay] Refund reconciliation poll error for paymentId={}: {}",
+                    paymentId,
+                    e.getMessage()
+                );
+            }
+        }
+
+        log.warn(
+            "[SBGPay] Refund reconciliation finished with status={} for paymentId={}",
+            latestFailed.status,
+            paymentId
+        );
+        return latestFailed;
+    }
+
     private RefundResponse reverseAndWaitForTerminalStatus(String sourcePaymentId) throws Exception {
         RefundResponse initialResponse = reversePaymentOnServer(sourcePaymentId);
         String initialStatus = initialResponse.status;
 
         log.info("[SBGPay] Reversal accepted: sourcePaymentId={}, status={}", sourcePaymentId, initialStatus);
-
-        if (isRefundFailedStatus(initialStatus)) {
-            String detail = initialResponse.errorMessage != null && !initialResponse.errorMessage.isEmpty()
-                ? initialResponse.errorMessage
-                : initialStatus;
-            throw new Exception(detail);
-        }
 
         RefundResponse terminalResponse = isRefundSuccessStatus(initialStatus)
             ? initialResponse
@@ -2333,31 +2464,79 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
 
             final String paymentIdToCancel = paymentId.trim();
             final Payment paymentForCallback = paymentToCancel;
-            new Thread(() -> {
-                try {
-                    plugin.cancelOrReversePaymentOnServer(paymentIdToCancel);
+            CancelOperationResult cachedResult = plugin.getFreshCancelResult(
+                paymentIdToCancel
+            );
+            if (cachedResult != null) {
+                plugin.log.info(
+                    "[SBGPay] Cancel request reused cached result for {}: success={}, detail={}",
+                    paymentIdToCancel,
+                    cachedResult.success,
+                    cachedResult.detail
+                );
+                dispatchCallback(request, paymentForCallback, cachedResult);
+                return;
+            }
 
-                    SwingUtilities.invokeLater(() -> {
-                        try {
-                            if (paymentForCallback != null) {
-                                request.getPaymentCallback().paymentCompleted(paymentForCallback);
-                            } else {
-                                request.getPaymentCallback().paymentNotCompleted();
-                            }
-                        } catch (InvalidPaymentException e) {
-                            plugin.log.error("[SBGPay] Cancel callback rejected by POS", e);
-                            request.getPaymentCallback().paymentNotCompleted();
-                        }
-                    });
-                } catch (Exception e) {
-                    plugin.log.warn(
-                        "[SBGPay] Cancel request failed for {}: {}",
+            CancelOperationHandle handle = plugin.acquireCancelOperation(
+                paymentIdToCancel
+            );
+            if (handle.owner) {
+                new Thread(() -> {
+                    CancelOperationResult result;
+                    try {
+                        plugin.cancelOrReversePaymentOnServer(paymentIdToCancel);
+                        result = new CancelOperationResult(true, "ok");
+                    } catch (Exception e) {
+                        plugin.log.warn(
+                            "[SBGPay] Cancel request failed for {}: {}",
+                            paymentIdToCancel,
+                            e.getMessage()
+                        );
+                        result = new CancelOperationResult(
+                            false,
+                            e.getMessage() != null ? e.getMessage() : e.toString()
+                        );
+                    }
+                    plugin.completeCancelOperation(
                         paymentIdToCancel,
-                        e.getMessage());
-                    SwingUtilities.invokeLater(() ->
-                        request.getPaymentCallback().paymentNotCompleted());
+                        handle.operation,
+                        result
+                    );
+                }, "sbgpay-cancel").start();
+            } else {
+                plugin.log.info(
+                    "[SBGPay] Cancel request joined in-flight operation for {}",
+                    paymentIdToCancel
+                );
+            }
+
+            handle.operation.future.whenComplete((result, error) ->
+                dispatchCallback(request, paymentForCallback, result));
+        }
+
+        private void dispatchCallback(CancelRequest request,
+                                      Payment paymentForCallback,
+                                      CancelOperationResult result) {
+            SwingUtilities.invokeLater(() -> {
+                if (result == null || !result.success) {
+                    request.getPaymentCallback().paymentNotCompleted();
+                    return;
                 }
-            }, "sbgpay-cancel").start();
+
+                try {
+                    if (paymentForCallback != null) {
+                        request.getPaymentCallback().paymentCompleted(
+                            paymentForCallback
+                        );
+                    } else {
+                        request.getPaymentCallback().paymentNotCompleted();
+                    }
+                } catch (InvalidPaymentException e) {
+                    plugin.log.error("[SBGPay] Cancel callback rejected by POS", e);
+                    request.getPaymentCallback().paymentNotCompleted();
+                }
+            });
         }
 
         private boolean hasText(String value) {
@@ -2429,24 +2608,6 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                         "[SBGPay] Reversal accepted: sourcePaymentId={}, status={}",
                         sourcePaymentIdFinal,
                         initialStatus);
-
-                    if (plugin.isRefundFailedStatus(initialStatus)) {
-                        String detail = hasText(initialResponse.errorMessage)
-                            ? initialResponse.errorMessage
-                            : initialStatus;
-                        plugin.log.warn(
-                            "[SBGPay] Reversal failed: "
-                                + "sourcePaymentId={}, status={}, error={}",
-                            sourcePaymentIdFinal,
-                            initialStatus,
-                            initialResponse.errorMessage);
-                        SwingUtilities.invokeLater(() ->
-                            plugin.showRefundErrorAndAbort(
-                                plugin.getString("refund.failed", "Refund failed: ")
-                                    + detail,
-                                request));
-                        return;
-                    }
 
                     RefundResponse terminalResponse;
                     if (plugin.isRefundSuccessStatus(initialStatus)) {
@@ -2670,6 +2831,34 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     // ====================
     // DTO CLASSES
     // ====================
+
+    private static class CancelOperationInFlight {
+        private final CompletableFuture<CancelOperationResult> future =
+            new CompletableFuture<>();
+    }
+
+    private static class CancelOperationHandle {
+        private final CancelOperationInFlight operation;
+        private final boolean owner;
+
+        private CancelOperationHandle(CancelOperationInFlight operation,
+                                      boolean owner) {
+            this.operation = operation;
+            this.owner = owner;
+        }
+    }
+
+    private static class CancelOperationResult {
+        private final boolean success;
+        private final String detail;
+        private final long finishedAtMs;
+
+        private CancelOperationResult(boolean success, String detail) {
+            this.success = success;
+            this.detail = detail;
+            this.finishedAtMs = System.currentTimeMillis();
+        }
+    }
 
     private static class PaymentMethod {
         String methodId;
