@@ -25,6 +25,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Executors;
@@ -979,12 +980,8 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         log.warn("[SBGPay] Refund aborted: {}", message);
 
         try {
-            uiForms.showMessageForm(message, new ConfirmListener() {
-                @Override
-                public void eventConfirmed() {
-                    request.getPaymentCallback().paymentNotCompleted();
-                }
-            });
+            uiForms.showMessageForm(message,
+                () -> request.getPaymentCallback().paymentNotCompleted());
         } catch (IncorrectStateException e) {
             request.getPaymentCallback().paymentNotCompleted();
         }
@@ -1335,8 +1332,9 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
             PaymentStatus statusAfterConflict = null;
             try {
                 statusAfterConflict = fetchPaymentStatus(paymentId, DEFAULT_HTTP_TIMEOUT_MS);
-            } catch (Exception ignored) {
-                // keep original exception context below
+            } catch (Exception statusReadError) {
+                log.debug("[SBGPay] Cancel conflict: failed to read status for paymentId={}",
+                    paymentId, statusReadError);
             }
 
             String conflictStatus = statusAfterConflict != null ? statusAfterConflict.status : null;
@@ -1531,7 +1529,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         // Р СџРЎР‚Р С•Р В±РЎС“Р ВµР С Р С—Р С• Р Р…Р В°Р В·Р Р†Р В°Р Р…Р С‘РЎР‹ Р ВµР Т‘Р С‘Р Р…Р С‘РЎвЂ РЎвЂ№ Р С‘Р В·Р СР ВµРЎР‚Р ВµР Р…Р С‘РЎРЏ
         String measureName = item.getMeasureName();
         if (measureName != null && !measureName.isEmpty()) {
-            String nameLower = measureName.toLowerCase().trim();
+            String nameLower = measureName.toLowerCase(Locale.ROOT).trim();
 
             // Р С™Р С‘Р В»Р С•Р С–РЎР‚Р В°Р СР С
             if (nameLower.equals("Р С”Р С–") || nameLower.equals("Р С”Р С‘Р В»Р С•Р С–РЎР‚Р В°Р СР С") ||
@@ -1703,8 +1701,8 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
             return false;
         }
 
-        String detail = e.detail != null ? e.detail.toLowerCase() : "";
-        String title = e.title != null ? e.title.toLowerCase() : "";
+        String detail = e.detail != null ? e.detail.toLowerCase(Locale.ROOT) : "";
+        String title = e.title != null ? e.title.toLowerCase(Locale.ROOT) : "";
 
         return detail.contains("status 'completed'")
             || detail.contains("status \"completed\"")
@@ -1718,8 +1716,8 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
             return false;
         }
 
-        String detail = e.detail != null ? e.detail.toLowerCase() : "";
-        String title = e.title != null ? e.title.toLowerCase() : "";
+        String detail = e.detail != null ? e.detail.toLowerCase(Locale.ROOT) : "";
+        String title = e.title != null ? e.title.toLowerCase(Locale.ROOT) : "";
 
         return detail.contains("already reversed")
             || detail.contains("already refunded")
@@ -1735,7 +1733,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
             return false;
         }
 
-        String detail = e.detail != null ? e.detail.toLowerCase() : "";
+        String detail = e.detail != null ? e.detail.toLowerCase(Locale.ROOT) : "";
         return detail.contains("status 'completed'")
             || detail.contains("status \"completed\"")
             || detail.contains("already completed")
@@ -1856,12 +1854,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         log.warn("[SBGPay] Aborting: {}", message);
 
         try {
-            uiForms.showMessageForm(message, new ConfirmListener() {
-                @Override
-                public void eventConfirmed() {
-                    callback.paymentNotCompleted();
-                }
-            });
+            uiForms.showMessageForm(message, callback::paymentNotCompleted);
         } catch (IncorrectStateException e) {
             callback.paymentNotCompleted();
         }
@@ -2148,7 +2141,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
             return null;
         }
 
-        String normalized = rawValue.trim().toLowerCase();
+        String normalized = rawValue.trim().toLowerCase(Locale.ROOT);
         if (normalized.isEmpty()) {
             return null;
         }

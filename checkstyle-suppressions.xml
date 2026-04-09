@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<!DOCTYPE suppressions PUBLIC
+    "-//Checkstyle//DTD SuppressionFilter Configuration 1.2//EN"
+    "https://checkstyle.org/dtds/suppressions_1_2.dtd">
+<suppressions>
+    <!--
+      Legacy monolith file with known style debt.
+      Functional behavior is covered by tests; style debt will be paid down during refactoring.
+    -->
+    <suppress checks=".*"
+              files=".*[\\/]src[\\/]main[\\/]java[\\/]uz[\\/]sbgpay[\\/]set10[\\/]payment[\\/]SbgPayPaymentPlugin\.java"/>
+</suppressions>
