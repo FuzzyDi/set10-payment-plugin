@@ -511,101 +511,34 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
             return;
         }
 
-        final long startTime = System.currentTimeMillis();
-        final long timeoutMs = pollTimeoutSeconds * 1000L;
+        PaymentPollingContext context = new PaymentPollingContext(
+            callback,
+            amount,
+            System.currentTimeMillis(),
+            pollTimeoutSeconds * 1000L
+        );
+        PaymentPollingOrchestrator orchestrator =
+            new PaymentPollingOrchestrator(this, context);
 
         statusPoller = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "sbgpay-status-poller");
-            t.setDaemon(true);
-            return t;
+            Thread thread = new Thread(r, "sbgpay-status-poller");
+            thread.setDaemon(true);
+            return thread;
         });
 
-        log.info("[SBGPay] Starting status polling: paymentId={}, interval={}ms, timeout={}s",
-            currentPaymentId, pollDelayMs, pollTimeoutSeconds);
+        log.info(
+            "[SBGPay] Starting status polling: paymentId={}, interval={}ms, timeout={}s",
+            currentPaymentId,
+            pollDelayMs,
+            pollTimeoutSeconds
+        );
 
-        statusPoller.scheduleWithFixedDelay(() -> {
-            try {
-                if (!paymentInProgress || currentPaymentId == null) {
-                    return;
-                }
-
-                long elapsed = System.currentTimeMillis() - startTime;
-                long remainingMs = timeoutMs - elapsed;
-
-                if (remainingMs <= 0) {
-                    log.warn("[SBGPay] Payment timeout after {}ms", elapsed);
-                    stopStatusPolling();
-                    SwingUtilities.invokeLater(() ->
-                        showErrorAndAbort(getString("error.timeout", "Р вЂ™РЎР‚Р ВµР СРЎРЏ Р С•Р В¶Р С‘Р Т‘Р В°Р Р…Р С‘РЎРЏ Р С•Р С—Р В»Р В°РЎвЂљРЎвЂ№ Р С‘РЎРѓРЎвЂљР ВµР С”Р В»Р С•"), callback));
-                    return;
-                }
-
-                int statusRequestTimeoutMs = calculateStatusRequestTimeoutMs(remainingMs);
-                PaymentStatus status = fetchPaymentStatus(currentPaymentId, statusRequestTimeoutMs);
-                String qrData = getQrData(status);
-                log.debug("[SBGPay] Status poll: status={}, hasQrData={}, elapsed={}ms, remaining={}ms, requestTimeout={}ms",
-                    status.status, qrData != null && !qrData.isEmpty(), elapsed, remainingMs, statusRequestTimeoutMs);
-
-                if (!qrDisplayed && qrData != null && !qrData.isEmpty()) {
-                    qrDisplayed = true;
-                    log.info("[SBGPay] Received QR in status response, showing on customer display");
-                    final String qrDataToDisplay = qrData;
-                    SwingUtilities.invokeLater(() -> showQrOnCustomerDisplay(amount, qrDataToDisplay));
-                }
-
-                if (isSuccessStatus(status.status)) {
-                    log.info("[SBGPay] Payment completed successfully");
-                    stopStatusPolling();
-                    SwingUtilities.invokeLater(() -> completePaymentFlow(callback, amount, status));
-
-                } else if (isFailedStatus(status.status)) {
-                    String errorDetail = status.errorMessage != null && !status.errorMessage.isEmpty()
-                        ? status.errorMessage
-                        : status.status;
-                    log.warn("[SBGPay] Payment failed: status={}, error={}", status.status, status.errorMessage);
-                    stopStatusPolling();
-                    SwingUtilities.invokeLater(() ->
-                        showErrorAndAbort(getString("error.payment.failed", "Р С›Р С—Р В»Р В°РЎвЂљР В° Р Р…Р Вµ Р Р†РЎвЂ№Р С—Р С•Р В»Р Р…Р ВµР Р…Р В°: ") + errorDetail, callback));
-                }
-
-            } catch (Exception e) {
-                long elapsedAfterError = System.currentTimeMillis() - startTime;
-                long remainingAfterError = Math.max(0L, timeoutMs - elapsedAfterError);
-                int requestTimeoutMs = calculateStatusRequestTimeoutMs(Math.max(1L, remainingAfterError));
-
-                if (isRequestTimeoutException(e)) {
-                    log.warn("[SBGPay] Status poll request timeout: elapsed={}ms, remaining={}ms, requestTimeout={}ms, error={}",
-                        elapsedAfterError, remainingAfterError, requestTimeoutMs, extractErrorDetails(e));
-
-                    if (elapsedAfterError >= timeoutMs) {
-                        log.warn("[SBGPay] Payment timeout after polling timeouts ({}ms)", elapsedAfterError);
-                        stopStatusPolling();
-                        SwingUtilities.invokeLater(() ->
-                            showErrorAndAbort(getString("error.timeout", "Время ожидания оплаты истекло"), callback));
-                    }
-                    return;
-                }
-
-                if (isCommunicationException(e)) {
-                    log.error("[SBGPay] Status polling communication error", e);
-                    stopStatusPolling();
-                    SwingUtilities.invokeLater(() ->
-                        showErrorAndAbort(
-                            getString("error.communication",
-                                "Нет связи с процессингом. Проверьте сеть и повторите операцию."),
-                            callback));
-                    return;
-                }
-
-                log.error("[SBGPay] Status polling error", e);
-                if (elapsedAfterError >= timeoutMs) {
-                    log.warn("[SBGPay] Payment timeout after polling error ({}ms)", elapsedAfterError);
-                    stopStatusPolling();
-                    SwingUtilities.invokeLater(() ->
-                        showErrorAndAbort(getString("error.timeout", "Время ожидания оплаты истекло"), callback));
-                }
-            }
-        }, pollDelayMs, pollDelayMs, TimeUnit.MILLISECONDS);
+        statusPoller.scheduleWithFixedDelay(
+            orchestrator::onTick,
+            pollDelayMs,
+            pollDelayMs,
+            TimeUnit.MILLISECONDS
+        );
     }
 
     private void stopStatusPolling() {
@@ -2077,6 +2010,202 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
             return URLEncoder.encode(s != null ? s : "", "UTF-8");
         } catch (Exception e) {
             return "";
+        }
+    }
+
+    // ====================
+    // POLLING ORCHESTRATION
+    // ====================
+
+    private static class PaymentPollingContext {
+
+        private final PaymentCallback callback;
+        private final BigDecimal amount;
+        private final long startTimeMs;
+        private final long timeoutMs;
+
+        PaymentPollingContext(
+            PaymentCallback callback,
+            BigDecimal amount,
+            long startTimeMs,
+            long timeoutMs
+        ) {
+            this.callback = callback;
+            this.amount = amount;
+            this.startTimeMs = startTimeMs;
+            this.timeoutMs = timeoutMs;
+        }
+
+        long elapsedMs() {
+            return System.currentTimeMillis() - startTimeMs;
+        }
+
+        long remainingMs(long elapsedMs) {
+            return timeoutMs - elapsedMs;
+        }
+    }
+
+    private static class PaymentPollingOrchestrator {
+
+        private final SbgPayPaymentPlugin plugin;
+        private final PaymentPollingContext context;
+
+        PaymentPollingOrchestrator(
+            SbgPayPaymentPlugin plugin,
+            PaymentPollingContext context
+        ) {
+            this.plugin = plugin;
+            this.context = context;
+        }
+
+        void onTick() {
+            try {
+                if (!plugin.paymentInProgress || plugin.currentPaymentId == null) {
+                    return;
+                }
+
+                long elapsed = context.elapsedMs();
+                long remainingMs = context.remainingMs(elapsed);
+
+                if (remainingMs <= 0) {
+                    handleTimeout(elapsed);
+                    return;
+                }
+
+                int statusRequestTimeoutMs =
+                    plugin.calculateStatusRequestTimeoutMs(remainingMs);
+                PaymentStatus status = plugin.fetchPaymentStatus(
+                    plugin.currentPaymentId,
+                    statusRequestTimeoutMs
+                );
+                String qrData = plugin.getQrData(status);
+
+                plugin.log.debug(
+                    "[SBGPay] Status poll: status={}, hasQrData={}, elapsed={}ms, "
+                        + "remaining={}ms, requestTimeout={}ms",
+                    status.status,
+                    qrData != null && !qrData.isEmpty(),
+                    elapsed,
+                    remainingMs,
+                    statusRequestTimeoutMs
+                );
+
+                showQrIfNeeded(qrData);
+                handleTerminalStatus(status);
+            } catch (Exception e) {
+                handlePollingException(e);
+            }
+        }
+
+        private void showQrIfNeeded(String qrData) {
+            if (plugin.qrDisplayed || qrData == null || qrData.isEmpty()) {
+                return;
+            }
+
+            plugin.qrDisplayed = true;
+            plugin.log.info(
+                "[SBGPay] Received QR in status response, showing on customer display");
+            final String qrDataToDisplay = qrData;
+            SwingUtilities.invokeLater(() ->
+                plugin.showQrOnCustomerDisplay(context.amount, qrDataToDisplay));
+        }
+
+        private void handleTerminalStatus(PaymentStatus status) {
+            if (plugin.isSuccessStatus(status.status)) {
+                plugin.log.info("[SBGPay] Payment completed successfully");
+                plugin.stopStatusPolling();
+                SwingUtilities.invokeLater(() ->
+                    plugin.completePaymentFlow(context.callback, context.amount, status));
+                return;
+            }
+
+            if (plugin.isFailedStatus(status.status)) {
+                String errorDetail =
+                    status.errorMessage != null && !status.errorMessage.isEmpty()
+                        ? status.errorMessage
+                        : status.status;
+                plugin.log.warn(
+                    "[SBGPay] Payment failed: status={}, error={}",
+                    status.status,
+                    status.errorMessage
+                );
+                plugin.stopStatusPolling();
+                SwingUtilities.invokeLater(() ->
+                    plugin.showErrorAndAbort(
+                        plugin.getString(
+                            "error.payment.failed",
+                            "Оплата не выполнена: ") + errorDetail,
+                        context.callback));
+            }
+        }
+
+        private void handleTimeout(long elapsed) {
+            plugin.log.warn("[SBGPay] Payment timeout after {}ms", elapsed);
+            plugin.stopStatusPolling();
+            SwingUtilities.invokeLater(() ->
+                plugin.showErrorAndAbort(
+                    plugin.getString("error.timeout", "Время ожидания оплаты истекло"),
+                    context.callback));
+        }
+
+        private void handlePollingException(Exception error) {
+            long elapsedAfterError = context.elapsedMs();
+            long remainingAfterError =
+                Math.max(0L, context.remainingMs(elapsedAfterError));
+            int requestTimeoutMs = plugin.calculateStatusRequestTimeoutMs(
+                Math.max(1L, remainingAfterError));
+
+            if (plugin.isRequestTimeoutException(error)) {
+                plugin.log.warn(
+                    "[SBGPay] Status poll request timeout: elapsed={}ms, "
+                        + "remaining={}ms, requestTimeout={}ms, error={}",
+                    elapsedAfterError,
+                    remainingAfterError,
+                    requestTimeoutMs,
+                    plugin.extractErrorDetails(error)
+                );
+
+                if (elapsedAfterError >= context.timeoutMs) {
+                    plugin.log.warn(
+                        "[SBGPay] Payment timeout after polling timeouts ({}ms)",
+                        elapsedAfterError
+                    );
+                    plugin.stopStatusPolling();
+                    SwingUtilities.invokeLater(() ->
+                        plugin.showErrorAndAbort(
+                            plugin.getString(
+                                "error.timeout",
+                                "Время ожидания оплаты истекло"),
+                            context.callback));
+                }
+                return;
+            }
+
+            if (plugin.isCommunicationException(error)) {
+                plugin.log.error("[SBGPay] Status polling communication error", error);
+                plugin.stopStatusPolling();
+                SwingUtilities.invokeLater(() ->
+                    plugin.showErrorAndAbort(
+                        plugin.getString(
+                            "error.communication",
+                            "Нет связи с процессингом. Проверьте сеть и "
+                                + "повторите операцию."),
+                        context.callback));
+                return;
+            }
+
+            plugin.log.error("[SBGPay] Status polling error", error);
+            if (elapsedAfterError >= context.timeoutMs) {
+                plugin.log.warn(
+                    "[SBGPay] Payment timeout after polling error ({}ms)",
+                    elapsedAfterError
+                );
+                plugin.stopStatusPolling();
+                SwingUtilities.invokeLater(() ->
+                    plugin.showErrorAndAbort(
+                        plugin.getString("error.timeout", "Время ожидания оплаты истекло"),
+                        context.callback));
+            }
         }
     }
 
