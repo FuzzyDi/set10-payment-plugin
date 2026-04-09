@@ -12,6 +12,7 @@ import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -273,6 +274,66 @@ class SbgPayPaymentPluginTest {
     void plugin_implementsTransactionalAndPreparationRefundContracts() {
         assertTrue(RefundPreparationPlugin.class.isAssignableFrom(SbgPayPaymentPlugin.class));
         assertTrue(TransactionalRefundPlugin.class.isAssignableFrom(SbgPayPaymentPlugin.class));
+    }
+
+    @Test
+    void acquireCancelOperation_joinsExistingInFlightOperation() throws Exception {
+        Object plugin = newPlugin();
+        String paymentId = "pay-" + UUID.randomUUID();
+
+        Method acquire = method("acquireCancelOperation", String.class);
+        Object firstHandle = acquire.invoke(plugin, paymentId);
+        Object secondHandle = acquire.invoke(plugin, paymentId);
+
+        Field ownerField = firstHandle.getClass().getDeclaredField("owner");
+        ownerField.setAccessible(true);
+        assertTrue((Boolean) ownerField.get(firstHandle));
+        assertFalse((Boolean) ownerField.get(secondHandle));
+
+        Field operationField = firstHandle.getClass().getDeclaredField("operation");
+        operationField.setAccessible(true);
+        Object firstOperation = operationField.get(firstHandle);
+        Object secondOperation = operationField.get(secondHandle);
+        assertTrue(firstOperation == secondOperation);
+    }
+
+    @Test
+    void completeCancelOperation_cachesSuccessfulResult() throws Exception {
+        Object plugin = newPlugin();
+        String paymentId = "pay-" + UUID.randomUUID();
+
+        Method acquire = method("acquireCancelOperation", String.class);
+        Object handle = acquire.invoke(plugin, paymentId);
+
+        Field operationField = handle.getClass().getDeclaredField("operation");
+        operationField.setAccessible(true);
+        Object operation = operationField.get(handle);
+
+        Class<?> resultClass = Class.forName(
+            "uz.sbgpay.set10.payment.SbgPayPaymentPlugin$CancelOperationResult");
+        Constructor<?> resultCtor = resultClass.getDeclaredConstructor(
+            boolean.class,
+            String.class
+        );
+        resultCtor.setAccessible(true);
+        Object successResult = resultCtor.newInstance(true, "ok");
+
+        Method complete = method(
+            "completeCancelOperation",
+            String.class,
+            Class.forName(
+                "uz.sbgpay.set10.payment.SbgPayPaymentPlugin$CancelOperationInFlight"),
+            resultClass
+        );
+        complete.invoke(plugin, paymentId, operation, successResult);
+
+        Method fresh = method("getFreshCancelResult", String.class);
+        Object cached = fresh.invoke(plugin, paymentId);
+        assertTrue(cached != null);
+
+        Field successField = resultClass.getDeclaredField("success");
+        successField.setAccessible(true);
+        assertTrue((Boolean) successField.get(cached));
     }
 
     private Object newPlugin() throws Exception {

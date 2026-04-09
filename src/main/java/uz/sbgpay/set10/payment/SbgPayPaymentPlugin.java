@@ -5,20 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 
 import javax.swing.SwingUtilities;
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.math.BigDecimal;
 import java.net.ConnectException;
-import java.net.HttpURLConnection;
 import java.net.NoRouteToHostException;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
-import java.net.URL;
 import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -28,9 +21,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import ru.crystals.pos.api.comm.CommunicationMessage;
 import ru.crystals.pos.api.plugin.PaymentPlugin;
@@ -96,6 +92,16 @@ import ru.crystals.pos.spi.ui.payment.SumToPayFormParameters;
 public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlugin, TransactionalRefundPlugin {
 
     private static final int DEFAULT_HTTP_TIMEOUT_MS = 30000;
+    private static final long REFUND_FAILED_RECHECK_WINDOW_MS = 20000L;
+    private static final long CANCEL_RESULT_CACHE_TTL_MS = 15000L;
+    private static final AtomicReference<String> LAST_CONFIG_SNAPSHOT =
+        new AtomicReference<>();
+    private static final AtomicReference<String> LAST_AVAILABILITY_SNAPSHOT =
+        new AtomicReference<>();
+    private static final ConcurrentHashMap<String, CancelOperationInFlight>
+        CANCEL_OPERATIONS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, CancelOperationResult>
+        RECENT_CANCEL_RESULTS = new ConcurrentHashMap<>();
 
     // ====================
     // Р ВР СњР Р„Р вЂўР С™Р В¦Р ВР В Set API
@@ -133,7 +139,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     private int pollDelayMs;
     private int pollTimeoutSeconds;
     private boolean sendReceipt;
-    private volatile String lastLoggedConfigSnapshot;
+    private volatile SbgPayHttpClient httpClient;
 
     // ====================
     // Р РЋР С›Р РЋР СћР С›Р Р‡Р СњР ВР вЂў Р СџР вЂєР С’Р СћР вЂўР вЂ“Р С’
@@ -155,12 +161,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     @Override
     public boolean isAvailable() {
         loadConfiguration(false);
-
-        boolean available = hasRequiredConfiguration();
-        if (available) {
-            log.debug("[SBGPay] isAvailable=true");
-        }
-        return available;
+        return hasRequiredConfiguration();
     }
 
     @Override
@@ -170,207 +171,18 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
             posInfo != null ? posInfo.getShopNumber() : "?",
             posInfo != null ? posInfo.getPOSNumber() : "?",
             request.getReceipt().getNumber());
-
-        loadConfiguration();
-
-        if (!hasRequiredConfiguration()) {
-            log.error("[SBGPay] Plugin not available");
-            request.getPaymentCallback().paymentNotCompleted();
-            return;
-        }
-
-        // Р РЋР В±РЎР‚Р С•РЎРѓ РЎРѓР С•РЎРѓРЎвЂљР С•РЎРЏР Р…Р С‘РЎРЏ
-        resetState();
-
-        final PaymentCallback callback = request.getPaymentCallback();
-        final Receipt receipt = request.getReceipt();
-        final BigDecimal amount = receipt.getSurchargeSum();
-
-        log.info("[SBGPay] Amount to pay: {} {}", amount, currency);
-
-        // Р СџР С•Р С”Р В°Р В·РЎвЂ№Р Р†Р В°Р ВµР С РЎРѓР С—Р С‘Р Р…Р Р…Р ВµРЎР‚ Р С‘ Р В·Р В°Р С–РЎР‚РЎС“Р В¶Р В°Р ВµР С Р СР ВµРЎвЂљР С•Р Т‘РЎвЂ№ Р С•Р С—Р В»Р В°РЎвЂљРЎвЂ№
-        showSpinner(getString("loading.methods", "Р вЂ”Р В°Р С–РЎР‚РЎС“Р В·Р С”Р В° Р СР ВµРЎвЂљР С•Р Т‘Р С•Р Р† Р С•Р С—Р В»Р В°РЎвЂљРЎвЂ№..."));
-
-        new Thread(() -> {
-            try {
-                List<PaymentMethod> methods = fetchPaymentMethods();
-
-                if (methods.isEmpty()) {
-                    SwingUtilities.invokeLater(() ->
-                        showErrorAndAbort(getString("error.no.methods", "Р СњР ВµРЎвЂљ Р Т‘Р С•РЎРѓРЎвЂљРЎС“Р С—Р Р…РЎвЂ№РЎвЂ¦ Р СР ВµРЎвЂљР С•Р Т‘Р С•Р Р† Р С•Р С—Р В»Р В°РЎвЂљРЎвЂ№"), callback));
-                    return;
-                }
-
-                log.info("[SBGPay] Loaded {} payment methods", methods.size());
-                SwingUtilities.invokeLater(() ->
-                    showMethodSelectionForm(methods, callback, receipt, amount));
-
-            } catch (Exception e) {
-                log.error("[SBGPay] Failed to load payment methods", e);
-                SwingUtilities.invokeLater(() ->
-                    showErrorAndAbort(resolveErrorMessage(
-                        e,
-                        "error.load.methods",
-                        "Р С›РЎв‚¬Р С‘Р В±Р С”Р В° Р В·Р В°Р С–РЎР‚РЎС“Р В·Р С”Р С‘ Р СР ВµРЎвЂљР С•Р Т‘Р С•Р Р†: "),
-                        callback));
-            }
-        }, "sbgpay-load-methods").start();
+        new SbgPayPaymentUseCase(this).execute(request);
     }
 
     @Override
     public void doPaymentCancel(CancelRequest request) {
-        loadConfiguration();
-
-        stopStatusPolling();
-        clearCustomerDisplay();
-
-        Payment paymentToCancel = request.getPayment();
-        String paymentId = null;
-        if (paymentToCancel != null) {
-            paymentId = extractPaymentIdFromData(paymentToCancel.getData());
-        }
-        if (!hasText(paymentId)) {
-            paymentId = currentPaymentId;
-        }
-
-        log.info("[SBGPay] Payment cancel requested, paymentId={}", paymentId);
-
-        if (!hasText(paymentId)) {
-            log.warn("[SBGPay] Cancel aborted: source paymentId not found");
-            request.getPaymentCallback().paymentNotCompleted();
-            return;
-        }
-
-        final String paymentIdToCancel = paymentId.trim();
-        final Payment paymentForCallback = paymentToCancel;
-        new Thread(() -> {
-            try {
-                cancelOrReversePaymentOnServer(paymentIdToCancel);
-
-                SwingUtilities.invokeLater(() -> {
-                    try {
-                        if (paymentForCallback != null) {
-                            request.getPaymentCallback().paymentCompleted(paymentForCallback);
-                        } else {
-                            request.getPaymentCallback().paymentNotCompleted();
-                        }
-                    } catch (InvalidPaymentException e) {
-                        log.error("[SBGPay] Cancel callback rejected by POS", e);
-                        request.getPaymentCallback().paymentNotCompleted();
-                    }
-                });
-            } catch (Exception e) {
-                log.warn("[SBGPay] Cancel request failed for {}: {}", paymentIdToCancel, e.getMessage());
-                SwingUtilities.invokeLater(() -> request.getPaymentCallback().paymentNotCompleted());
-            }
-        }, "sbgpay-cancel").start();
+        new SbgPayPaymentCancelUseCase(this).execute(request);
     }
 
     @Override
     public void doRefund(RefundRequest request) {
         log.info("[SBGPay] ===== REFUND START =====");
-
-        loadConfiguration();
-
-        if (!hasRequiredConfiguration()) {
-            log.error("[SBGPay] Refund aborted: plugin not available");
-            request.getPaymentCallback().paymentNotCompleted();
-            return;
-        }
-
-        BigDecimal sumToRefund = request.getSumToRefund();
-        if (sumToRefund == null || sumToRefund.compareTo(BigDecimal.ZERO) <= 0) {
-            showRefundErrorAndAbort(
-                getString("refund.amount.invalid", "Invalid refund amount"),
-                request
-            );
-            return;
-        }
-
-        BigDecimal originalPaymentSum = extractOriginalPaymentSum(request);
-        if (originalPaymentSum != null && !isFullRefundAmount(sumToRefund, originalPaymentSum)) {
-            log.warn("[SBGPay] Partial refund is not supported: requested={}, original={}",
-                sumToRefund, originalPaymentSum);
-            showRefundErrorAndAbort(
-                getString(
-                    "refund.partial.not.supported",
-                    "Partial refund is not supported: SBG reversal accepts only full refund amount"
-                ),
-                request
-            );
-            return;
-        }
-
-        String sourcePaymentId = extractSourcePaymentId(request);
-        if (sourcePaymentId == null || sourcePaymentId.isEmpty()) {
-            showRefundErrorAndAbort(
-                getString("refund.source.missing", "Source paymentId was not found for refund"),
-                request
-            );
-            return;
-        }
-
-        showSpinner(getString("refund.creating", "Creating refund..."));
-        showCustomerText(getString("refund.creating", "Creating refund..."));
-
-        final String sourcePaymentIdFinal = sourcePaymentId;
-        new Thread(() -> {
-            try {
-                RefundResponse initialResponse = reversePaymentOnServer(sourcePaymentIdFinal);
-                String initialStatus = initialResponse.status;
-                log.info("[SBGPay] Reversal accepted: sourcePaymentId={}, status={}", sourcePaymentIdFinal, initialStatus);
-
-                if (isRefundFailedStatus(initialStatus)) {
-                    String detail = initialResponse.errorMessage != null && !initialResponse.errorMessage.isEmpty()
-                        ? initialResponse.errorMessage
-                        : initialStatus;
-                    log.warn("[SBGPay] Reversal failed: sourcePaymentId={}, status={}, error={}",
-                        sourcePaymentIdFinal, initialStatus, initialResponse.errorMessage);
-                    SwingUtilities.invokeLater(() ->
-                        showRefundErrorAndAbort(getString("refund.failed", "Refund failed: ") + detail, request));
-                    return;
-                }
-
-                RefundResponse terminalResponse;
-                if (isRefundSuccessStatus(initialStatus)) {
-                    terminalResponse = initialResponse;
-                } else {
-                    showSpinner(getString("refund.waiting", "Waiting for refund confirmation..."));
-                    showCustomerText(getString("refund.waiting", "Waiting for refund confirmation..."));
-                    terminalResponse = waitForRefundTerminalStatus(sourcePaymentIdFinal);
-                }
-
-                if (isRefundFailedStatus(terminalResponse.status)) {
-                    String detail = terminalResponse.errorMessage != null && !terminalResponse.errorMessage.isEmpty()
-                        ? terminalResponse.errorMessage
-                        : terminalResponse.status;
-                    log.warn("[SBGPay] Refund failed: sourcePaymentId={}, status={}, error={}",
-                        sourcePaymentIdFinal, terminalResponse.status, terminalResponse.errorMessage);
-                    SwingUtilities.invokeLater(() ->
-                        showRefundErrorAndAbort(getString("refund.failed", "Refund failed: ") + detail, request));
-                    return;
-                }
-
-                if (!isRefundSuccessStatus(terminalResponse.status)) {
-                    log.warn("[SBGPay] Refund returned unexpected terminal status '{}'", terminalResponse.status);
-                    SwingUtilities.invokeLater(() ->
-                        showRefundErrorAndAbort(getString("refund.failed", "Refund failed: ") + terminalResponse.status, request));
-                    return;
-                }
-
-                log.info("[SBGPay] Reversal completed: sourcePaymentId={}, status={}", sourcePaymentIdFinal, terminalResponse.status);
-                SwingUtilities.invokeLater(() ->
-                    completeRefundFlow(request, sumToRefund, sourcePaymentIdFinal, terminalResponse));
-
-            } catch (Exception e) {
-                log.error("[SBGPay] Refund failed", e);
-                SwingUtilities.invokeLater(() ->
-                    showRefundErrorAndAbort(resolveErrorMessage(
-                        e,
-                        "refund.create.error",
-                        "Refund creation error: "), request));
-            }
-        }, "sbgpay-refund").start();
+        new SbgPayRefundUseCase(this).execute(request);
     }
 
     @Override
@@ -383,101 +195,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     @Override
     public void doTransactionalRefund(TransactionalRefundRequest request) {
         log.info("[SBGPay] ===== TRANSACTIONAL REFUND START =====");
-
-        loadConfiguration();
-
-        if (!hasRequiredConfiguration()) {
-            log.error("[SBGPay] Transactional refund aborted: plugin not available");
-            request.getOperationCallback().operationNotCompleted(null);
-            return;
-        }
-
-        List<PaymentToRefund> paymentsToRefund = request.getPaymentsToRefund();
-        if (paymentsToRefund == null || paymentsToRefund.isEmpty()) {
-            log.warn("[SBGPay] Transactional refund aborted: no payments to refund");
-            request.getOperationCallback().operationNotCompleted(null);
-            return;
-        }
-
-        BigDecimal totalSumToRefund = request.getSumToRefund();
-        if (totalSumToRefund == null || totalSumToRefund.compareTo(BigDecimal.ZERO) <= 0) {
-            log.warn("[SBGPay] Transactional refund aborted: invalid sumToRefund={}", totalSumToRefund);
-            request.getOperationCallback().operationNotCompleted(null);
-            return;
-        }
-
-        new Thread(() -> {
-            try {
-                List<String> sourcePaymentIds = new ArrayList<>();
-                List<String> refundIds = new ArrayList<>();
-                List<String> refundCodes = new ArrayList<>();
-
-                for (PaymentToRefund paymentToRefund : paymentsToRefund) {
-                    if (paymentToRefund == null || paymentToRefund.getOriginalPayment() == null) {
-                        throw new Exception("Original payment is missing in transactional refund request");
-                    }
-
-                    ProcessedPayment originalPayment = paymentToRefund.getOriginalPayment();
-                    BigDecimal originalPaymentSum = originalPayment.getSum();
-                    BigDecimal requestedSum = paymentToRefund.getSumToRefund();
-
-                    if (requestedSum == null || requestedSum.compareTo(BigDecimal.ZERO) <= 0) {
-                        throw new Exception(getString("refund.amount.invalid", "Invalid refund amount"));
-                    }
-                    if (originalPaymentSum != null && !isFullRefundAmount(requestedSum, originalPaymentSum)) {
-                        throw new Exception(getString(
-                            "refund.partial.not.supported",
-                            "Partial refund is not supported: SBG reversal accepts only full refund amount"));
-                    }
-
-                    String sourcePaymentId = extractPaymentIdFromData(originalPayment.getData());
-                    if (!hasText(sourcePaymentId)) {
-                        throw new Exception(getString(
-                            "refund.source.missing",
-                            "Source paymentId was not found for refund"));
-                    }
-
-                    sourcePaymentId = sourcePaymentId.trim();
-                    RefundResponse terminalResponse = reverseAndWaitForTerminalStatus(sourcePaymentId);
-
-                    sourcePaymentIds.add(sourcePaymentId);
-                    if (hasText(terminalResponse.refundId)) {
-                        refundIds.add(terminalResponse.refundId.trim());
-                    }
-                    if (hasText(terminalResponse.refundCode)) {
-                        refundCodes.add(terminalResponse.refundCode.trim());
-                    }
-                }
-
-                PaymentResultData resultData = new PaymentResultData();
-                resultData.getData().put("sbgpay.sourcePaymentId", String.join(",", sourcePaymentIds));
-                resultData.getData().put("sbgpay.refundId", String.join(",", refundIds));
-                resultData.getData().put("sbgpay.refundCode", String.join(",", refundCodes));
-                resultData.getData().put("sbgpay.refundStatus", "refunded");
-
-                StringBuilder slip = new StringBuilder();
-                slip.append(getString("refund.success", "Refund completed"));
-                slip.append("\n");
-                slip.append("Sum: ").append(totalSumToRefund.toPlainString()).append(" ").append(currency);
-                slip.append("\n");
-                slip.append("sourcePaymentId: ").append(String.join(",", sourcePaymentIds));
-                if (!refundIds.isEmpty()) {
-                    slip.append("\nrefundId: ").append(String.join(",", refundIds));
-                }
-                resultData.getSlips().add(slip.toString());
-
-                log.info("[SBGPay] Transactional refund completed: count={}, sum={}",
-                    sourcePaymentIds.size(), totalSumToRefund);
-                request.getOperationCallback().refundCompleted(new TransactionalRefundResult(resultData));
-            } catch (Exception e) {
-                log.error("[SBGPay] Transactional refund failed", e);
-
-                PaymentResultData errorData = new PaymentResultData();
-                errorData.getData().put("sbgpay.refundStatus", "refund_failed");
-
-                request.getOperationCallback().operationNotCompleted(new TransactionalRefundResult(errorData));
-            }
-        }, "sbgpay-transactional-refund").start();
+        new SbgPayTransactionalRefundUseCase(this).execute(request);
     }
 
     // ====================
@@ -800,101 +518,34 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
             return;
         }
 
-        final long startTime = System.currentTimeMillis();
-        final long timeoutMs = pollTimeoutSeconds * 1000L;
+        PaymentPollingContext context = new PaymentPollingContext(
+            callback,
+            amount,
+            System.currentTimeMillis(),
+            pollTimeoutSeconds * 1000L
+        );
+        PaymentPollingOrchestrator orchestrator =
+            new PaymentPollingOrchestrator(this, context);
 
         statusPoller = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "sbgpay-status-poller");
-            t.setDaemon(true);
-            return t;
+            Thread thread = new Thread(r, "sbgpay-status-poller");
+            thread.setDaemon(true);
+            return thread;
         });
 
-        log.info("[SBGPay] Starting status polling: paymentId={}, interval={}ms, timeout={}s",
-            currentPaymentId, pollDelayMs, pollTimeoutSeconds);
+        log.info(
+            "[SBGPay] Starting status polling: paymentId={}, interval={}ms, timeout={}s",
+            currentPaymentId,
+            pollDelayMs,
+            pollTimeoutSeconds
+        );
 
-        statusPoller.scheduleWithFixedDelay(() -> {
-            try {
-                if (!paymentInProgress || currentPaymentId == null) {
-                    return;
-                }
-
-                long elapsed = System.currentTimeMillis() - startTime;
-                long remainingMs = timeoutMs - elapsed;
-
-                if (remainingMs <= 0) {
-                    log.warn("[SBGPay] Payment timeout after {}ms", elapsed);
-                    stopStatusPolling();
-                    SwingUtilities.invokeLater(() ->
-                        showErrorAndAbort(getString("error.timeout", "Р вЂ™РЎР‚Р ВµР СРЎРЏ Р С•Р В¶Р С‘Р Т‘Р В°Р Р…Р С‘РЎРЏ Р С•Р С—Р В»Р В°РЎвЂљРЎвЂ№ Р С‘РЎРѓРЎвЂљР ВµР С”Р В»Р С•"), callback));
-                    return;
-                }
-
-                int statusRequestTimeoutMs = calculateStatusRequestTimeoutMs(remainingMs);
-                PaymentStatus status = fetchPaymentStatus(currentPaymentId, statusRequestTimeoutMs);
-                String qrData = getQrData(status);
-                log.debug("[SBGPay] Status poll: status={}, hasQrData={}, elapsed={}ms, remaining={}ms, requestTimeout={}ms",
-                    status.status, qrData != null && !qrData.isEmpty(), elapsed, remainingMs, statusRequestTimeoutMs);
-
-                if (!qrDisplayed && qrData != null && !qrData.isEmpty()) {
-                    qrDisplayed = true;
-                    log.info("[SBGPay] Received QR in status response, showing on customer display");
-                    final String qrDataToDisplay = qrData;
-                    SwingUtilities.invokeLater(() -> showQrOnCustomerDisplay(amount, qrDataToDisplay));
-                }
-
-                if (isSuccessStatus(status.status)) {
-                    log.info("[SBGPay] Payment completed successfully");
-                    stopStatusPolling();
-                    SwingUtilities.invokeLater(() -> completePaymentFlow(callback, amount, status));
-
-                } else if (isFailedStatus(status.status)) {
-                    String errorDetail = status.errorMessage != null && !status.errorMessage.isEmpty()
-                        ? status.errorMessage
-                        : status.status;
-                    log.warn("[SBGPay] Payment failed: status={}, error={}", status.status, status.errorMessage);
-                    stopStatusPolling();
-                    SwingUtilities.invokeLater(() ->
-                        showErrorAndAbort(getString("error.payment.failed", "Р С›Р С—Р В»Р В°РЎвЂљР В° Р Р…Р Вµ Р Р†РЎвЂ№Р С—Р С•Р В»Р Р…Р ВµР Р…Р В°: ") + errorDetail, callback));
-                }
-
-            } catch (Exception e) {
-                long elapsedAfterError = System.currentTimeMillis() - startTime;
-                long remainingAfterError = Math.max(0L, timeoutMs - elapsedAfterError);
-                int requestTimeoutMs = calculateStatusRequestTimeoutMs(Math.max(1L, remainingAfterError));
-
-                if (isRequestTimeoutException(e)) {
-                    log.warn("[SBGPay] Status poll request timeout: elapsed={}ms, remaining={}ms, requestTimeout={}ms, error={}",
-                        elapsedAfterError, remainingAfterError, requestTimeoutMs, extractErrorDetails(e));
-
-                    if (elapsedAfterError >= timeoutMs) {
-                        log.warn("[SBGPay] Payment timeout after polling timeouts ({}ms)", elapsedAfterError);
-                        stopStatusPolling();
-                        SwingUtilities.invokeLater(() ->
-                            showErrorAndAbort(getString("error.timeout", "Время ожидания оплаты истекло"), callback));
-                    }
-                    return;
-                }
-
-                if (isCommunicationException(e)) {
-                    log.error("[SBGPay] Status polling communication error", e);
-                    stopStatusPolling();
-                    SwingUtilities.invokeLater(() ->
-                        showErrorAndAbort(
-                            getString("error.communication",
-                                "Нет связи с процессингом. Проверьте сеть и повторите операцию."),
-                            callback));
-                    return;
-                }
-
-                log.error("[SBGPay] Status polling error", e);
-                if (elapsedAfterError >= timeoutMs) {
-                    log.warn("[SBGPay] Payment timeout after polling error ({}ms)", elapsedAfterError);
-                    stopStatusPolling();
-                    SwingUtilities.invokeLater(() ->
-                        showErrorAndAbort(getString("error.timeout", "Время ожидания оплаты истекло"), callback));
-                }
-            }
-        }, pollDelayMs, pollDelayMs, TimeUnit.MILLISECONDS);
+        statusPoller.scheduleWithFixedDelay(
+            orchestrator::onTick,
+            pollDelayMs,
+            pollDelayMs,
+            TimeUnit.MILLISECONDS
+        );
     }
 
     private void stopStatusPolling() {
@@ -1224,22 +875,16 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
 
         log.debug("[SBGPay] Status response: {}", response.toString());
 
+        SbgPayStatusMapper.PaymentStatusPayload payload =
+            SbgPayStatusMapper.mapPaymentStatus(response);
+
         PaymentStatus status = new PaymentStatus();
-        status.paymentId = getText(response, "paymentId");
-        status.paymentCode = getText(response, "paymentCode");
-        status.status = getText(response, "status");
-
-        status.qrPayload = getText(response, "qrPayload");
-
-        status.qrCodeData = getText(response, "qrCodeData");
-
-        status.errorMessage = getText(response, "errorMessage");
-        if (status.errorMessage == null) {
-            status.errorMessage = getText(response, "error");
-        }
-        if (status.errorMessage == null) {
-            status.errorMessage = getText(response, "message");
-        }
+        status.paymentId = payload.getPaymentId();
+        status.paymentCode = payload.getPaymentCode();
+        status.status = payload.getStatus();
+        status.qrPayload = payload.getQrPayload();
+        status.qrCodeData = payload.getQrCodeData();
+        status.errorMessage = payload.getErrorMessage();
 
         return status;
     }
@@ -1354,6 +999,41 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         }
     }
 
+    private CancelOperationResult getFreshCancelResult(String paymentId) {
+        CancelOperationResult result = RECENT_CANCEL_RESULTS.get(paymentId);
+        if (result == null) {
+            return null;
+        }
+
+        long ageMs = System.currentTimeMillis() - result.finishedAtMs;
+        if (ageMs <= CANCEL_RESULT_CACHE_TTL_MS) {
+            return result;
+        }
+
+        RECENT_CANCEL_RESULTS.remove(paymentId, result);
+        return null;
+    }
+
+    private CancelOperationHandle acquireCancelOperation(String paymentId) {
+        CancelOperationInFlight newOperation = new CancelOperationInFlight();
+        CancelOperationInFlight existing = CANCEL_OPERATIONS.putIfAbsent(
+            paymentId,
+            newOperation
+        );
+        if (existing == null) {
+            return new CancelOperationHandle(newOperation, true);
+        }
+        return new CancelOperationHandle(existing, false);
+    }
+
+    private void completeCancelOperation(String paymentId,
+                                         CancelOperationInFlight inFlight,
+                                         CancelOperationResult result) {
+        RECENT_CANCEL_RESULTS.put(paymentId, result);
+        inFlight.future.complete(result);
+        CANCEL_OPERATIONS.remove(paymentId, inFlight);
+    }
+
     private RefundResponse reversePaymentOnServer(String sourcePaymentId) throws Exception {
         String url = baseUrl + "/api/v1/payments/" + urlEncode(sourcePaymentId) + "/reversal";
 
@@ -1418,12 +1098,16 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
             log.debug("[SBGPay] Refund status poll: paymentId={}, status={}, elapsed={}ms, remaining={}ms, requestTimeout={}ms",
                 paymentId, lastStatus, elapsed, remainingMs, requestTimeoutMs);
 
-            if (isRefundSuccessStatus(lastStatus) || isRefundFailedStatus(lastStatus)) {
-                RefundResponse terminal = new RefundResponse();
-                terminal.refundId = paymentId;
-                terminal.status = lastStatus;
-                terminal.errorMessage = paymentStatus.errorMessage;
-                return terminal;
+            if (isRefundSuccessStatus(lastStatus)) {
+                return toRefundResponse(paymentId, paymentStatus);
+            }
+            if (isRefundFailedStatus(lastStatus)) {
+                return reconcileRefundFailedStatus(
+                    paymentId,
+                    paymentStatus,
+                    startTime,
+                    timeoutMs
+                );
             }
 
             try {
@@ -1435,18 +1119,102 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         }
     }
 
+    private RefundResponse toRefundResponse(String paymentId, PaymentStatus status) {
+        RefundResponse terminal = new RefundResponse();
+        terminal.refundId = paymentId;
+        terminal.status = status != null ? status.status : null;
+        terminal.errorMessage = status != null ? status.errorMessage : null;
+        return terminal;
+    }
+
+    private RefundResponse reconcileRefundFailedStatus(String paymentId,
+                                                       PaymentStatus initialFailedStatus,
+                                                       long flowStartTimeMs,
+                                                       long flowTimeoutMs) throws Exception {
+        RefundResponse latestFailed = toRefundResponse(paymentId, initialFailedStatus);
+        long reconcileDeadlineMs = Math.min(
+            System.currentTimeMillis() + REFUND_FAILED_RECHECK_WINDOW_MS,
+            flowStartTimeMs + flowTimeoutMs
+        );
+
+        log.warn(
+            "[SBGPay] Refund reached status=refund_failed, "
+                + "starting reconciliation: paymentId={}, window={}ms",
+            paymentId,
+            Math.max(0L, reconcileDeadlineMs - System.currentTimeMillis())
+        );
+
+        while (System.currentTimeMillis() < reconcileDeadlineMs) {
+            long sleepMs = Math.min(
+                Math.max(200L, pollDelayMs),
+                Math.max(1L, reconcileDeadlineMs - System.currentTimeMillis())
+            );
+
+            try {
+                Thread.sleep(sleepMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new Exception("Refund polling interrupted");
+            }
+
+            long elapsed = System.currentTimeMillis() - flowStartTimeMs;
+            long remainingMs = flowTimeoutMs - elapsed;
+            if (remainingMs <= 0) {
+                break;
+            }
+
+            int requestTimeoutMs = calculateStatusRequestTimeoutMs(remainingMs);
+            try {
+                PaymentStatus recheckedStatus = fetchPaymentStatus(
+                    paymentId,
+                    requestTimeoutMs
+                );
+                String status = recheckedStatus.status;
+                log.debug(
+                    "[SBGPay] Refund reconcile poll: paymentId={}, status={}, elapsed={}ms, "
+                        + "remaining={}ms, requestTimeout={}ms",
+                    paymentId,
+                    status,
+                    elapsed,
+                    remainingMs,
+                    requestTimeoutMs
+                );
+
+                if (isRefundSuccessStatus(status)) {
+                    log.info(
+                        "[SBGPay] Refund reconciliation succeeded: "
+                            + "paymentId={}, status={}",
+                        paymentId,
+                        status
+                    );
+                    return toRefundResponse(paymentId, recheckedStatus);
+                }
+
+                if (isRefundFailedStatus(status)) {
+                    latestFailed = toRefundResponse(paymentId, recheckedStatus);
+                }
+            } catch (Exception e) {
+                log.warn(
+                    "[SBGPay] Refund reconciliation poll error for paymentId={}: {}",
+                    paymentId,
+                    e.getMessage()
+                );
+            }
+        }
+
+        log.warn(
+            "[SBGPay] Refund reconciliation finished with status={} for paymentId={}",
+            latestFailed.status,
+            paymentId
+        );
+        return latestFailed;
+    }
+
     private RefundResponse reverseAndWaitForTerminalStatus(String sourcePaymentId) throws Exception {
         RefundResponse initialResponse = reversePaymentOnServer(sourcePaymentId);
         String initialStatus = initialResponse.status;
 
         log.info("[SBGPay] Reversal accepted: sourcePaymentId={}, status={}", sourcePaymentId, initialStatus);
-
-        if (isRefundFailedStatus(initialStatus)) {
-            String detail = initialResponse.errorMessage != null && !initialResponse.errorMessage.isEmpty()
-                ? initialResponse.errorMessage
-                : initialStatus;
-            throw new Exception(detail);
-        }
 
         RefundResponse terminalResponse = isRefundSuccessStatus(initialStatus)
             ? initialResponse
@@ -1579,30 +1347,14 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     }
 
     private JsonNode httpGet(String url, int timeoutMs) throws Exception {
-        long startTime = System.currentTimeMillis();
-        int effectiveTimeoutMs = timeoutMs > 0 ? timeoutMs : DEFAULT_HTTP_TIMEOUT_MS;
-
-        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-        conn.setRequestMethod("GET");
-        conn.setRequestProperty("Device-Token", deviceToken);
-        conn.setRequestProperty("Accept", "application/json");
-        conn.setConnectTimeout(effectiveTimeoutMs);
-        conn.setReadTimeout(effectiveTimeoutMs);
-
         try {
-            int status = conn.getResponseCode();
-            String body = readResponseBody(conn, status);
-
-            long elapsed = System.currentTimeMillis() - startTime;
-            log.debug("[HTTP] GET {} -> {} ({}ms, timeout={}ms)", url, status, elapsed, effectiveTimeoutMs);
-
-            if (status >= 400) {
-                handleHttpError(status, body);
-            }
-
-            return objectMapper.readTree(body.isEmpty() ? "{}" : body);
-        } finally {
-            conn.disconnect();
+            return getHttpClient().get(url, timeoutMs);
+        } catch (SbgPayHttpClient.HttpStatusException e) {
+            throw new HttpStatusException(
+                e.getStatus(),
+                e.getTitle(),
+                e.getDetail()
+            );
         }
     }
 
@@ -1614,87 +1366,34 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                               Map<String, Object> body,
                               String idempotencyKey,
                               boolean withBody) throws Exception {
-        long startTime = System.currentTimeMillis();
-
-        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-        conn.setRequestMethod("POST");
-        conn.setRequestProperty("Device-Token", deviceToken);
-        conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("Idempotency-Key", idempotencyKey);
-        conn.setConnectTimeout(30000);
-        conn.setReadTimeout(30000);
-        if (withBody) {
-            conn.setRequestProperty("Content-Type", "application/json");
-            conn.setDoOutput(true);
-            Map<String, Object> effectiveBody = body != null ? body : Collections.emptyMap();
-            byte[] payload = objectMapper.writeValueAsBytes(effectiveBody);
-
-            log.debug("[HTTP] POST {} Request body: {}", url, new String(payload, StandardCharsets.UTF_8));
-
-            try (OutputStream os = conn.getOutputStream()) {
-                os.write(payload);
-            }
-        } else {
-            conn.setDoOutput(false);
-            log.debug("[HTTP] POST {} Request body: <empty>", url);
-        }
-
         try {
-            int status = conn.getResponseCode();
-            String responseBody = readResponseBody(conn, status);
-
-            long elapsed = System.currentTimeMillis() - startTime;
-            log.debug("[HTTP] POST {} -> {} ({}ms)", url, status, elapsed);
-
-            log.debug("[HTTP] POST {} Response body: {}", url, responseBody);
-
-            if (status >= 400) {
-                handleHttpError(status, responseBody);
-            }
-
-            return objectMapper.readTree(responseBody.isEmpty() ? "{}" : responseBody);
-        } finally {
-            conn.disconnect();
+            return getHttpClient().post(url, body, idempotencyKey, withBody);
+        } catch (SbgPayHttpClient.HttpStatusException e) {
+            throw new HttpStatusException(
+                e.getStatus(),
+                e.getTitle(),
+                e.getDetail()
+            );
         }
     }
 
-    private String readResponseBody(HttpURLConnection conn, int status) throws Exception {
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
-                status < 400 ? conn.getInputStream() : conn.getErrorStream(), StandardCharsets.UTF_8))) {
-
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line);
-            }
-            return sb.toString();
+    private SbgPayHttpClient getHttpClient() {
+        SbgPayHttpClient client = httpClient;
+        if (client != null) {
+            return client;
         }
+
+        client = new SbgPayHttpClient(
+            objectMapper,
+            log,
+            deviceToken,
+            DEFAULT_HTTP_TIMEOUT_MS,
+            this::getString
+        );
+        httpClient = client;
+        return client;
     }
 
-    private void handleHttpError(int status, String body) throws Exception {
-        String detail = "HTTP " + status;
-        String title = null;
-
-        try {
-            JsonNode error = objectMapper.readTree(body);
-            if (error.has("detail")) {
-                detail = error.get("detail").asText();
-            } else if (error.has("title")) {
-                detail = error.get("title").asText();
-            }
-            if (error.has("title")) {
-                title = error.get("title").asText();
-            }
-        } catch (IOException ignored) {}
-
-        if (status == 401) {
-            throw new Exception(getString("error.unauthorized", "Р С›РЎв‚¬Р С‘Р В±Р С”Р В° Р В°Р Р†РЎвЂљР С•РЎР‚Р С‘Р В·Р В°РЎвЂ Р С‘Р С‘: Р С—РЎР‚Р С•Р Р†Р ВµРЎР‚РЎРЉРЎвЂљР Вµ Device-Token"));
-        } else if (status == 429) {
-            throw new Exception(getString("error.rate.limit", "Р РЋР В»Р С‘РЎв‚¬Р С”Р С•Р С Р СР Р…Р С•Р С–Р С• Р В·Р В°Р С—РЎР‚Р С•РЎРѓР С•Р Р†, Р С—Р С•Р С—РЎР‚Р С•Р В±РЎС“Р в„–РЎвЂљР Вµ Р С—Р С•Р В·Р В¶Р Вµ"));
-        } else {
-            throw new HttpStatusException(status, title, detail);
-        }
-    }
 
     private boolean isAlreadyCompletedConflict(HttpStatusException e) {
         if (e == null || e.status != 409) {
@@ -1878,18 +1577,85 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 log.trace("[SBGPay] Plugin property keys: {}", safePropertyKeys(pluginProps));
             }
 
-            baseUrl = readStringOption(serviceProps, pluginProps, "sbgpay.baseUrl", "https://sbg.amasia.io/pos", verboseDebug);
-            deviceToken = readStringOption(serviceProps, pluginProps, "sbgpay.deviceToken", null, verboseDebug);
-            language = readStringOption(serviceProps, pluginProps, "sbgpay.lang", "ru", verboseDebug);
-            currency = readStringOption(serviceProps, pluginProps, "sbgpay.currency", "UZS", verboseDebug);
+            String loadedBaseUrl = readStringOption(
+                serviceProps,
+                pluginProps,
+                "sbgpay.baseUrl",
+                "https://sbg.amasia.io/pos",
+                verboseDebug
+            );
+            String loadedDeviceToken = readStringOption(
+                serviceProps,
+                pluginProps,
+                "sbgpay.deviceToken",
+                null,
+                verboseDebug
+            );
+            String loadedLanguage = readStringOption(
+                serviceProps,
+                pluginProps,
+                "sbgpay.lang",
+                "ru",
+                verboseDebug
+            );
+            String loadedCurrency = readStringOption(
+                serviceProps,
+                pluginProps,
+                "sbgpay.currency",
+                "UZS",
+                verboseDebug
+            );
 
-            ttlSeconds = readIntOption(serviceProps, pluginProps, "sbgpay.ttlSeconds", 300, 60, 3600, verboseDebug);
-            pollDelayMs = readIntOption(serviceProps, pluginProps, "sbgpay.pollDelayMs", 2000, 500, 10000, verboseDebug);
-            pollTimeoutSeconds = readIntOption(serviceProps, pluginProps, "sbgpay.pollTimeoutSeconds", 420, 60, 7200, verboseDebug);
+            int loadedTtlSeconds = readIntOption(
+                serviceProps,
+                pluginProps,
+                "sbgpay.ttlSeconds",
+                300,
+                60,
+                3600,
+                verboseDebug
+            );
+            int loadedPollDelayMs = readIntOption(
+                serviceProps,
+                pluginProps,
+                "sbgpay.pollDelayMs",
+                2000,
+                500,
+                10000,
+                verboseDebug
+            );
+            int loadedPollTimeoutSeconds = readIntOption(
+                serviceProps,
+                pluginProps,
+                "sbgpay.pollTimeoutSeconds",
+                420,
+                60,
+                7200,
+                verboseDebug
+            );
+            boolean loadedSendReceipt = readBooleanOption(
+                serviceProps,
+                pluginProps,
+                "sbgpay.sendReceipt",
+                false,
+                verboseDebug
+            );
 
-            sendReceipt = readBooleanOption(serviceProps, pluginProps, "sbgpay.sendReceipt", false, verboseDebug);
+            SbgPayConfiguration loadedConfig = new SbgPayConfiguration(
+                loadedBaseUrl,
+                loadedDeviceToken,
+                loadedLanguage,
+                loadedCurrency,
+                loadedTtlSeconds,
+                new SbgPayConfiguration.PollingSettings(
+                    loadedPollDelayMs,
+                    loadedPollTimeoutSeconds
+                ),
+                loadedSendReceipt
+            );
 
-            logConfigurationIfChanged();
+            applyConfiguration(loadedConfig);
+            logConfigurationIfChanged(loadedConfig);
         } catch (Exception e) {
             log.error("[SBGPay] Failed to load configuration", e);
         }
@@ -2011,29 +1777,64 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     }
 
     private boolean hasRequiredConfiguration() {
-        if (!hasText(baseUrl)) {
-            log.info("[SBGPay] isAvailable=false: baseUrl not configured");
-            return false;
-        }
-        if (!hasText(deviceToken)) {
-            log.info("[SBGPay] isAvailable=false: deviceToken not configured");
-            return false;
-        }
-        return true;
+        String unavailableReason = getUnavailableConfigurationReason();
+        boolean available = unavailableReason == null;
+        logAvailabilityIfChanged(available, unavailableReason);
+        return available;
     }
 
-    private void logConfigurationIfChanged() {
-        String snapshot = "baseUrl=" + rawForLog(baseUrl)
-            + ", lang=" + rawForLog(language)
-            + ", currency=" + rawForLog(currency)
-            + ", ttl=" + ttlSeconds
-            + ", pollDelay=" + pollDelayMs
-            + ", pollTimeout=" + pollTimeoutSeconds
-            + ", sendReceipt=" + sendReceipt;
+    private void applyConfiguration(SbgPayConfiguration config) {
+        baseUrl = config.getBaseUrl();
+        deviceToken = config.getDeviceToken();
+        language = config.getLanguage();
+        currency = config.getCurrency();
+        ttlSeconds = config.getTtlSeconds();
+        pollDelayMs = config.getPollDelayMs();
+        pollTimeoutSeconds = config.getPollTimeoutSeconds();
+        sendReceipt = config.isSendReceipt();
 
-        if (!snapshot.equals(lastLoggedConfigSnapshot)) {
-            lastLoggedConfigSnapshot = snapshot;
+        httpClient = null;
+    }
+
+    private void logConfigurationIfChanged(SbgPayConfiguration config) {
+        String snapshot = config.snapshot();
+        if (updateSnapshotIfChanged(LAST_CONFIG_SNAPSHOT, snapshot)) {
             log.debug("[SBGPay] Config: {}", snapshot);
+        }
+    }
+
+    private String getUnavailableConfigurationReason() {
+        if (!hasText(baseUrl)) {
+            return "baseUrl not configured";
+        }
+        if (!hasText(deviceToken)) {
+            return "deviceToken not configured";
+        }
+        return null;
+    }
+
+    private void logAvailabilityIfChanged(boolean available, String unavailableReason) {
+        String snapshot = available ? "available" : "unavailable:" + unavailableReason;
+        if (!updateSnapshotIfChanged(LAST_AVAILABILITY_SNAPSHOT, snapshot)) {
+            return;
+        }
+
+        if (available) {
+            log.debug("[SBGPay] isAvailable=true");
+            return;
+        }
+        log.info("[SBGPay] isAvailable=false: {}", unavailableReason);
+    }
+
+    private boolean updateSnapshotIfChanged(AtomicReference<String> snapshotHolder, String newSnapshot) {
+        while (true) {
+            String currentSnapshot = snapshotHolder.get();
+            if (newSnapshot.equals(currentSnapshot)) {
+                return false;
+            }
+            if (snapshotHolder.compareAndSet(currentSnapshot, newSnapshot)) {
+                return true;
+            }
         }
     }
 
@@ -2372,8 +2173,692 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     }
 
     // ====================
+    // POLLING ORCHESTRATION
+    // ====================
+
+    private static class PaymentPollingContext {
+
+        private final PaymentCallback callback;
+        private final BigDecimal amount;
+        private final long startTimeMs;
+        private final long timeoutMs;
+
+        PaymentPollingContext(
+            PaymentCallback callback,
+            BigDecimal amount,
+            long startTimeMs,
+            long timeoutMs
+        ) {
+            this.callback = callback;
+            this.amount = amount;
+            this.startTimeMs = startTimeMs;
+            this.timeoutMs = timeoutMs;
+        }
+
+        long elapsedMs() {
+            return System.currentTimeMillis() - startTimeMs;
+        }
+
+        long remainingMs(long elapsedMs) {
+            return timeoutMs - elapsedMs;
+        }
+    }
+
+    private static class PaymentPollingOrchestrator {
+
+        private final SbgPayPaymentPlugin plugin;
+        private final PaymentPollingContext context;
+
+        PaymentPollingOrchestrator(
+            SbgPayPaymentPlugin plugin,
+            PaymentPollingContext context
+        ) {
+            this.plugin = plugin;
+            this.context = context;
+        }
+
+        void onTick() {
+            try {
+                if (!plugin.paymentInProgress || plugin.currentPaymentId == null) {
+                    return;
+                }
+
+                long elapsed = context.elapsedMs();
+                long remainingMs = context.remainingMs(elapsed);
+
+                if (remainingMs <= 0) {
+                    handleTimeout(elapsed);
+                    return;
+                }
+
+                int statusRequestTimeoutMs =
+                    plugin.calculateStatusRequestTimeoutMs(remainingMs);
+                PaymentStatus status = plugin.fetchPaymentStatus(
+                    plugin.currentPaymentId,
+                    statusRequestTimeoutMs
+                );
+                String qrData = plugin.getQrData(status);
+
+                plugin.log.debug(
+                    "[SBGPay] Status poll: status={}, hasQrData={}, elapsed={}ms, "
+                        + "remaining={}ms, requestTimeout={}ms",
+                    status.status,
+                    qrData != null && !qrData.isEmpty(),
+                    elapsed,
+                    remainingMs,
+                    statusRequestTimeoutMs
+                );
+
+                showQrIfNeeded(qrData);
+                handleTerminalStatus(status);
+            } catch (Exception e) {
+                handlePollingException(e);
+            }
+        }
+
+        private void showQrIfNeeded(String qrData) {
+            if (plugin.qrDisplayed || qrData == null || qrData.isEmpty()) {
+                return;
+            }
+
+            plugin.qrDisplayed = true;
+            plugin.log.info(
+                "[SBGPay] Received QR in status response, showing on customer display");
+            final String qrDataToDisplay = qrData;
+            SwingUtilities.invokeLater(() ->
+                plugin.showQrOnCustomerDisplay(context.amount, qrDataToDisplay));
+        }
+
+        private void handleTerminalStatus(PaymentStatus status) {
+            if (plugin.isSuccessStatus(status.status)) {
+                plugin.log.info("[SBGPay] Payment completed successfully");
+                plugin.stopStatusPolling();
+                SwingUtilities.invokeLater(() ->
+                    plugin.completePaymentFlow(context.callback, context.amount, status));
+                return;
+            }
+
+            if (plugin.isFailedStatus(status.status)) {
+                String errorDetail =
+                    status.errorMessage != null && !status.errorMessage.isEmpty()
+                        ? status.errorMessage
+                        : status.status;
+                plugin.log.warn(
+                    "[SBGPay] Payment failed: status={}, error={}",
+                    status.status,
+                    status.errorMessage
+                );
+                plugin.stopStatusPolling();
+                SwingUtilities.invokeLater(() ->
+                    plugin.showErrorAndAbort(
+                        plugin.getString(
+                            "error.payment.failed",
+                            "Оплата не выполнена: ") + errorDetail,
+                        context.callback));
+            }
+        }
+
+        private void handleTimeout(long elapsed) {
+            plugin.log.warn("[SBGPay] Payment timeout after {}ms", elapsed);
+            plugin.stopStatusPolling();
+            SwingUtilities.invokeLater(() ->
+                plugin.showErrorAndAbort(
+                    plugin.getString("error.timeout", "Время ожидания оплаты истекло"),
+                    context.callback));
+        }
+
+        private void handlePollingException(Exception error) {
+            long elapsedAfterError = context.elapsedMs();
+            long remainingAfterError =
+                Math.max(0L, context.remainingMs(elapsedAfterError));
+            int requestTimeoutMs = plugin.calculateStatusRequestTimeoutMs(
+                Math.max(1L, remainingAfterError));
+
+            if (plugin.isRequestTimeoutException(error)) {
+                plugin.log.warn(
+                    "[SBGPay] Status poll request timeout: elapsed={}ms, "
+                        + "remaining={}ms, requestTimeout={}ms, error={}",
+                    elapsedAfterError,
+                    remainingAfterError,
+                    requestTimeoutMs,
+                    plugin.extractErrorDetails(error)
+                );
+
+                if (elapsedAfterError >= context.timeoutMs) {
+                    plugin.log.warn(
+                        "[SBGPay] Payment timeout after polling timeouts ({}ms)",
+                        elapsedAfterError
+                    );
+                    plugin.stopStatusPolling();
+                    SwingUtilities.invokeLater(() ->
+                        plugin.showErrorAndAbort(
+                            plugin.getString(
+                                "error.timeout",
+                                "Время ожидания оплаты истекло"),
+                            context.callback));
+                }
+                return;
+            }
+
+            if (plugin.isCommunicationException(error)) {
+                plugin.log.error("[SBGPay] Status polling communication error", error);
+                plugin.stopStatusPolling();
+                SwingUtilities.invokeLater(() ->
+                    plugin.showErrorAndAbort(
+                        plugin.getString(
+                            "error.communication",
+                            "Нет связи с процессингом. Проверьте сеть и "
+                                + "повторите операцию."),
+                        context.callback));
+                return;
+            }
+
+            plugin.log.error("[SBGPay] Status polling error", error);
+            if (elapsedAfterError >= context.timeoutMs) {
+                plugin.log.warn(
+                    "[SBGPay] Payment timeout after polling error ({}ms)",
+                    elapsedAfterError
+                );
+                plugin.stopStatusPolling();
+                SwingUtilities.invokeLater(() ->
+                    plugin.showErrorAndAbort(
+                        plugin.getString("error.timeout", "Время ожидания оплаты истекло"),
+                        context.callback));
+            }
+        }
+    }
+
+    // ====================
+    // USE CASES
+    // ====================
+
+    private static class SbgPayPaymentUseCase {
+
+        private final SbgPayPaymentPlugin plugin;
+
+        SbgPayPaymentUseCase(SbgPayPaymentPlugin plugin) {
+            this.plugin = plugin;
+        }
+
+        void execute(PaymentRequest request) {
+            plugin.loadConfiguration();
+
+            if (!plugin.hasRequiredConfiguration()) {
+                plugin.log.error("[SBGPay] Plugin not available");
+                request.getPaymentCallback().paymentNotCompleted();
+                return;
+            }
+
+            plugin.resetState();
+
+            final PaymentCallback callback = request.getPaymentCallback();
+            final Receipt receipt = request.getReceipt();
+            final BigDecimal amount = receipt.getSurchargeSum();
+
+            plugin.log.info("[SBGPay] Amount to pay: {} {}", amount, plugin.currency);
+
+            plugin.showSpinner(
+                plugin.getString("loading.methods", "Loading payment methods..."));
+
+            new Thread(() -> {
+                try {
+                    List<PaymentMethod> methods = plugin.fetchPaymentMethods();
+
+                    if (methods.isEmpty()) {
+                        SwingUtilities.invokeLater(() ->
+                            plugin.showErrorAndAbort(
+                                plugin.getString(
+                                    "error.no.methods",
+                                    "No available payment methods"),
+                                callback));
+                        return;
+                    }
+
+                    plugin.log.info("[SBGPay] Loaded {} payment methods", methods.size());
+                    SwingUtilities.invokeLater(() ->
+                        plugin.showMethodSelectionForm(methods, callback, receipt, amount));
+                } catch (Exception e) {
+                    plugin.log.error("[SBGPay] Failed to load payment methods", e);
+                    SwingUtilities.invokeLater(() ->
+                        plugin.showErrorAndAbort(
+                            plugin.resolveErrorMessage(
+                                e,
+                                "error.load.methods",
+                                "Failed to load payment methods: "),
+                            callback));
+                }
+            }, "sbgpay-load-methods").start();
+        }
+    }
+
+    private static class SbgPayPaymentCancelUseCase {
+
+        private final SbgPayPaymentPlugin plugin;
+
+        SbgPayPaymentCancelUseCase(SbgPayPaymentPlugin plugin) {
+            this.plugin = plugin;
+        }
+
+        void execute(CancelRequest request) {
+            plugin.loadConfiguration();
+
+            plugin.stopStatusPolling();
+            plugin.clearCustomerDisplay();
+
+            Payment paymentToCancel = request.getPayment();
+            String paymentId = null;
+            if (paymentToCancel != null) {
+                paymentId = plugin.extractPaymentIdFromData(paymentToCancel.getData());
+            }
+            if (!hasText(paymentId)) {
+                paymentId = plugin.currentPaymentId;
+            }
+
+            plugin.log.info("[SBGPay] Payment cancel requested, paymentId={}", paymentId);
+
+            if (!hasText(paymentId)) {
+                plugin.log.warn("[SBGPay] Cancel aborted: source paymentId not found");
+                request.getPaymentCallback().paymentNotCompleted();
+                return;
+            }
+
+            final String paymentIdToCancel = paymentId.trim();
+            final Payment paymentForCallback = paymentToCancel;
+            CancelOperationResult cachedResult = plugin.getFreshCancelResult(
+                paymentIdToCancel
+            );
+            if (cachedResult != null) {
+                plugin.log.info(
+                    "[SBGPay] Cancel request reused cached result for {}: success={}, detail={}",
+                    paymentIdToCancel,
+                    cachedResult.success,
+                    cachedResult.detail
+                );
+                dispatchCallback(request, paymentForCallback, cachedResult);
+                return;
+            }
+
+            CancelOperationHandle handle = plugin.acquireCancelOperation(
+                paymentIdToCancel
+            );
+            if (handle.owner) {
+                new Thread(() -> {
+                    CancelOperationResult result;
+                    try {
+                        plugin.cancelOrReversePaymentOnServer(paymentIdToCancel);
+                        result = new CancelOperationResult(true, "ok");
+                    } catch (Exception e) {
+                        plugin.log.warn(
+                            "[SBGPay] Cancel request failed for {}: {}",
+                            paymentIdToCancel,
+                            e.getMessage()
+                        );
+                        result = new CancelOperationResult(
+                            false,
+                            e.getMessage() != null ? e.getMessage() : e.toString()
+                        );
+                    }
+                    plugin.completeCancelOperation(
+                        paymentIdToCancel,
+                        handle.operation,
+                        result
+                    );
+                }, "sbgpay-cancel").start();
+            } else {
+                plugin.log.info(
+                    "[SBGPay] Cancel request joined in-flight operation for {}",
+                    paymentIdToCancel
+                );
+            }
+
+            handle.operation.future.whenComplete((result, error) ->
+                dispatchCallback(request, paymentForCallback, result));
+        }
+
+        private void dispatchCallback(CancelRequest request,
+                                      Payment paymentForCallback,
+                                      CancelOperationResult result) {
+            SwingUtilities.invokeLater(() -> {
+                if (result == null || !result.success) {
+                    request.getPaymentCallback().paymentNotCompleted();
+                    return;
+                }
+
+                try {
+                    if (paymentForCallback != null) {
+                        request.getPaymentCallback().paymentCompleted(
+                            paymentForCallback
+                        );
+                    } else {
+                        request.getPaymentCallback().paymentNotCompleted();
+                    }
+                } catch (InvalidPaymentException e) {
+                    plugin.log.error("[SBGPay] Cancel callback rejected by POS", e);
+                    request.getPaymentCallback().paymentNotCompleted();
+                }
+            });
+        }
+
+        private boolean hasText(String value) {
+            return value != null && !value.trim().isEmpty();
+        }
+    }
+
+    private static class SbgPayRefundUseCase {
+
+        private final SbgPayPaymentPlugin plugin;
+
+        SbgPayRefundUseCase(SbgPayPaymentPlugin plugin) {
+            this.plugin = plugin;
+        }
+
+        void execute(RefundRequest request) {
+            plugin.loadConfiguration();
+
+            if (!plugin.hasRequiredConfiguration()) {
+                plugin.log.error("[SBGPay] Refund aborted: plugin not available");
+                request.getPaymentCallback().paymentNotCompleted();
+                return;
+            }
+
+            BigDecimal sumToRefund = request.getSumToRefund();
+            if (sumToRefund == null || sumToRefund.compareTo(BigDecimal.ZERO) <= 0) {
+                plugin.showRefundErrorAndAbort(
+                    plugin.getString("refund.amount.invalid", "Invalid refund amount"),
+                    request);
+                return;
+            }
+
+            BigDecimal originalPaymentSum = plugin.extractOriginalPaymentSum(request);
+            if (originalPaymentSum != null
+                && !plugin.isFullRefundAmount(sumToRefund, originalPaymentSum)) {
+                plugin.log.warn(
+                    "[SBGPay] Partial refund is not supported: requested={}, original={}",
+                    sumToRefund,
+                    originalPaymentSum);
+                plugin.showRefundErrorAndAbort(
+                    plugin.getString(
+                        "refund.partial.not.supported",
+                        "Partial refund is not supported: "
+                            + "SBG reversal accepts only full refund amount"),
+                    request);
+                return;
+            }
+
+            String sourcePaymentId = plugin.extractSourcePaymentId(request);
+            if (sourcePaymentId == null || sourcePaymentId.isEmpty()) {
+                plugin.showRefundErrorAndAbort(
+                    plugin.getString(
+                        "refund.source.missing",
+                        "Source paymentId was not found for refund"),
+                    request);
+                return;
+            }
+
+            plugin.showSpinner(plugin.getString("refund.creating", "Creating refund..."));
+            plugin.showCustomerText(plugin.getString("refund.creating", "Creating refund..."));
+
+            final String sourcePaymentIdFinal = sourcePaymentId;
+            new Thread(() -> {
+                try {
+                    RefundResponse initialResponse =
+                        plugin.reversePaymentOnServer(sourcePaymentIdFinal);
+                    String initialStatus = initialResponse.status;
+                    plugin.log.info(
+                        "[SBGPay] Reversal accepted: sourcePaymentId={}, status={}",
+                        sourcePaymentIdFinal,
+                        initialStatus);
+
+                    RefundResponse terminalResponse;
+                    if (plugin.isRefundSuccessStatus(initialStatus)) {
+                        terminalResponse = initialResponse;
+                    } else {
+                        plugin.showSpinner(
+                            plugin.getString(
+                                "refund.waiting",
+                                "Waiting for refund confirmation..."));
+                        plugin.showCustomerText(
+                            plugin.getString(
+                                "refund.waiting",
+                                "Waiting for refund confirmation..."));
+                        terminalResponse =
+                            plugin.waitForRefundTerminalStatus(sourcePaymentIdFinal);
+                    }
+
+                    if (plugin.isRefundFailedStatus(terminalResponse.status)) {
+                        String detail = hasText(terminalResponse.errorMessage)
+                            ? terminalResponse.errorMessage
+                            : terminalResponse.status;
+                        plugin.log.warn(
+                            "[SBGPay] Refund failed: "
+                                + "sourcePaymentId={}, status={}, error={}",
+                            sourcePaymentIdFinal,
+                            terminalResponse.status,
+                            terminalResponse.errorMessage);
+                        SwingUtilities.invokeLater(() ->
+                            plugin.showRefundErrorAndAbort(
+                                plugin.getString("refund.failed", "Refund failed: ")
+                                    + detail,
+                                request));
+                        return;
+                    }
+
+                    if (!plugin.isRefundSuccessStatus(terminalResponse.status)) {
+                        plugin.log.warn(
+                            "[SBGPay] Refund returned unexpected terminal status '{}'",
+                            terminalResponse.status);
+                        SwingUtilities.invokeLater(() ->
+                            plugin.showRefundErrorAndAbort(
+                                plugin.getString("refund.failed", "Refund failed: ")
+                                    + terminalResponse.status,
+                                request));
+                        return;
+                    }
+
+                    plugin.log.info(
+                        "[SBGPay] Reversal completed: sourcePaymentId={}, status={}",
+                        sourcePaymentIdFinal,
+                        terminalResponse.status);
+                    SwingUtilities.invokeLater(() ->
+                        plugin.completeRefundFlow(
+                            request,
+                            sumToRefund,
+                            sourcePaymentIdFinal,
+                            terminalResponse));
+                } catch (Exception e) {
+                    plugin.log.error("[SBGPay] Refund failed", e);
+                    SwingUtilities.invokeLater(() ->
+                        plugin.showRefundErrorAndAbort(
+                            plugin.resolveErrorMessage(
+                                e,
+                                "refund.create.error",
+                                "Refund creation error: "),
+                            request));
+                }
+            }, "sbgpay-refund").start();
+        }
+
+        private boolean hasText(String value) {
+            return value != null && !value.trim().isEmpty();
+        }
+    }
+
+    private static class SbgPayTransactionalRefundUseCase {
+
+        private final SbgPayPaymentPlugin plugin;
+
+        SbgPayTransactionalRefundUseCase(SbgPayPaymentPlugin plugin) {
+            this.plugin = plugin;
+        }
+
+        void execute(TransactionalRefundRequest request) {
+            plugin.loadConfiguration();
+
+            if (!plugin.hasRequiredConfiguration()) {
+                plugin.log.error("[SBGPay] Transactional refund aborted: plugin not available");
+                request.getOperationCallback().operationNotCompleted(null);
+                return;
+            }
+
+            List<PaymentToRefund> paymentsToRefund = request.getPaymentsToRefund();
+            if (paymentsToRefund == null || paymentsToRefund.isEmpty()) {
+                plugin.log.warn("[SBGPay] Transactional refund aborted: no payments to refund");
+                request.getOperationCallback().operationNotCompleted(null);
+                return;
+            }
+
+            BigDecimal totalSumToRefund = request.getSumToRefund();
+            if (totalSumToRefund == null
+                || totalSumToRefund.compareTo(BigDecimal.ZERO) <= 0) {
+                plugin.log.warn(
+                    "[SBGPay] Transactional refund aborted: invalid sumToRefund={}",
+                    totalSumToRefund);
+                request.getOperationCallback().operationNotCompleted(null);
+                return;
+            }
+
+            new Thread(() -> {
+                try {
+                    List<String> sourcePaymentIds = new ArrayList<>();
+                    List<String> refundIds = new ArrayList<>();
+                    List<String> refundCodes = new ArrayList<>();
+
+                    for (PaymentToRefund paymentToRefund : paymentsToRefund) {
+                        if (paymentToRefund == null
+                            || paymentToRefund.getOriginalPayment() == null) {
+                            throw new Exception(
+                                "Original payment is missing in "
+                                    + "transactional refund request");
+                        }
+
+                        ProcessedPayment originalPayment =
+                            paymentToRefund.getOriginalPayment();
+                        BigDecimal originalPaymentSum = originalPayment.getSum();
+                        BigDecimal requestedSum = paymentToRefund.getSumToRefund();
+
+                        if (requestedSum == null
+                            || requestedSum.compareTo(BigDecimal.ZERO) <= 0) {
+                            throw new Exception(
+                                plugin.getString(
+                                    "refund.amount.invalid",
+                                    "Invalid refund amount"));
+                        }
+                        if (originalPaymentSum != null
+                            && !plugin.isFullRefundAmount(
+                                requestedSum,
+                                originalPaymentSum)) {
+                            throw new Exception(
+                                plugin.getString(
+                                    "refund.partial.not.supported",
+                                    "Partial refund is not supported: "
+                                        + "SBG reversal accepts only full "
+                                        + "refund amount"));
+                        }
+
+                        String sourcePaymentId =
+                            plugin.extractPaymentIdFromData(originalPayment.getData());
+                        if (!hasText(sourcePaymentId)) {
+                            throw new Exception(
+                                plugin.getString(
+                                    "refund.source.missing",
+                                    "Source paymentId was not found for refund"));
+                        }
+
+                        sourcePaymentId = sourcePaymentId.trim();
+                        RefundResponse terminalResponse =
+                            plugin.reverseAndWaitForTerminalStatus(sourcePaymentId);
+
+                        sourcePaymentIds.add(sourcePaymentId);
+                        if (hasText(terminalResponse.refundId)) {
+                            refundIds.add(terminalResponse.refundId.trim());
+                        }
+                        if (hasText(terminalResponse.refundCode)) {
+                            refundCodes.add(terminalResponse.refundCode.trim());
+                        }
+                    }
+
+                    PaymentResultData resultData = new PaymentResultData();
+                    resultData.getData().put(
+                        "sbgpay.sourcePaymentId",
+                        String.join(",", sourcePaymentIds));
+                    resultData.getData().put(
+                        "sbgpay.refundId",
+                        String.join(",", refundIds));
+                    resultData.getData().put(
+                        "sbgpay.refundCode",
+                        String.join(",", refundCodes));
+                    resultData.getData().put("sbgpay.refundStatus", "refunded");
+
+                    StringBuilder slip = new StringBuilder();
+                    slip.append(plugin.getString("refund.success", "Refund completed"));
+                    slip.append("\n");
+                    slip.append("Sum: ")
+                        .append(totalSumToRefund.toPlainString())
+                        .append(" ")
+                        .append(plugin.currency);
+                    slip.append("\n");
+                    slip.append("sourcePaymentId: ")
+                        .append(String.join(",", sourcePaymentIds));
+                    if (!refundIds.isEmpty()) {
+                        slip.append("\nrefundId: ")
+                            .append(String.join(",", refundIds));
+                    }
+                    resultData.getSlips().add(slip.toString());
+
+                    plugin.log.info(
+                        "[SBGPay] Transactional refund completed: count={}, sum={}",
+                        sourcePaymentIds.size(),
+                        totalSumToRefund);
+                    request.getOperationCallback().refundCompleted(
+                        new TransactionalRefundResult(resultData));
+                } catch (Exception e) {
+                    plugin.log.error("[SBGPay] Transactional refund failed", e);
+
+                    PaymentResultData errorData = new PaymentResultData();
+                    errorData.getData().put("sbgpay.refundStatus", "refund_failed");
+
+                    request.getOperationCallback().operationNotCompleted(
+                        new TransactionalRefundResult(errorData));
+                }
+            }, "sbgpay-transactional-refund").start();
+        }
+
+        private boolean hasText(String value) {
+            return value != null && !value.trim().isEmpty();
+        }
+    }
+
+    // ====================
     // DTO CLASSES
     // ====================
+
+    private static class CancelOperationInFlight {
+        private final CompletableFuture<CancelOperationResult> future =
+            new CompletableFuture<>();
+    }
+
+    private static class CancelOperationHandle {
+        private final CancelOperationInFlight operation;
+        private final boolean owner;
+
+        private CancelOperationHandle(CancelOperationInFlight operation,
+                                      boolean owner) {
+            this.operation = operation;
+            this.owner = owner;
+        }
+    }
+
+    private static class CancelOperationResult {
+        private final boolean success;
+        private final String detail;
+        private final long finishedAtMs;
+
+        private CancelOperationResult(boolean success, String detail) {
+            this.success = success;
+            this.detail = detail;
+            this.finishedAtMs = System.currentTimeMillis();
+        }
+    }
 
     private static class PaymentMethod {
         String methodId;
