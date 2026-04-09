@@ -53,7 +53,7 @@ mvn -B -DskipTests com.github.spotbugs:spotbugs-maven-plugin:4.8.6.2:check
 mvn -B -DskipTests -Pstatic-analysis-report verify
 ```
 
-- Checkstyle: `778` нарушений
+- Checkstyle: `675` нарушений
 - PMD: `0` нарушений
 - SpotBugs report (`spotbugsXml.xml`): `8` low-priority instances
 - SpotBugs gate (`spotbugs:check`): `0` (High/Medium отсутствуют)
@@ -63,6 +63,7 @@ mvn -B -DskipTests -Pstatic-analysis-report verify
 - Ветка `main` обновлена до коммита `1e6a1b9`
 - SpotBugs High/Medium очищен до нуля
 - PMD очищен до нуля
+- Закрыт пакет Checkstyle `RegexpSingleline` (хвостовые пробелы)
 - `Jenkinsfile`, профили Maven и документация по запуску добавлены
 
 ## Рекомендуемый порядок дальнейшей зачистки

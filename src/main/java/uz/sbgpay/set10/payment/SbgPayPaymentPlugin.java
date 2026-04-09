@@ -70,7 +70,7 @@ import ru.crystals.pos.spi.ui.payment.SumToPayFormParameters;
 
 /**
  * SBG Pay Payment Plugin Р Т‘Р В»РЎРЏ Set Retail 10
- * 
+ *
  * Р СџР С•Р В»Р Р…Р С•Р Вµ РЎРѓР С•Р С•РЎвЂљР Р†Р ВµРЎвЂљРЎРѓРЎвЂљР Р†Р С‘Р Вµ РЎРѓР С—Р ВµРЎвЂ Р С‘РЎвЂћР С‘Р С”Р В°РЎвЂ Р С‘Р С‘ POS API v1:
  * - GET /api/v1/payment-methods РІР‚вЂќ Р С—Р С•Р В»РЎС“РЎвЂЎР ВµР Р…Р С‘Р Вµ Р СР ВµРЎвЂљР С•Р Т‘Р С•Р Р† Р С•Р С—Р В»Р В°РЎвЂљРЎвЂ№
  * - POST /api/v1/payments РІР‚вЂќ РЎРѓР С•Р В·Р Т‘Р В°Р Р…Р С‘Р Вµ Р С—Р В»Р В°РЎвЂљР ВµР В¶Р В°
@@ -78,7 +78,7 @@ import ru.crystals.pos.spi.ui.payment.SumToPayFormParameters;
  * - POST /api/v1/payments/{id}/complete РІР‚вЂќ Р С—Р С•Р Т‘РЎвЂљР Р†Р ВµРЎР‚Р В¶Р Т‘Р ВµР Р…Р С‘Р Вµ Р С—Р В»Р В°РЎвЂљР ВµР В¶Р В° Р С—Р С•РЎРѓР В»Р Вµ РЎвЂћР С‘РЎРѓР С”Р В°Р В»Р С‘Р В·Р В°РЎвЂ Р С‘Р С‘
  * - POST /api/v1/payments/{id}/cancel РІР‚вЂќ Р С•РЎвЂљР СР ВµР Р…Р В° Р С—Р В»Р В°РЎвЂљР ВµР В¶Р В°
  * - POST /api/v1/payments/{id}/reversal РІР‚вЂќ Р Р†Р С•Р В·Р Р†РЎР‚Р В°РЎвЂљ Р С—Р В»Р В°РЎвЂљР ВµР В¶Р В°
- * 
+ *
  * Р В¤Р В»Р С•РЎС“:
  * 1. Р С™Р В°РЎРѓРЎРѓР С‘РЎР‚ Р Р†РЎвЂ№Р В±Р С‘РЎР‚Р В°Р ВµРЎвЂљ РЎРѓР С—Р С•РЎРѓР С•Р В± Р С•Р С—Р В»Р В°РЎвЂљРЎвЂ№ (Р С—Р В»Р В°Р С–Р С‘Р Р…)
  * 2. Р СџР В»Р В°Р С–Р С‘Р Р… Р В·Р В°Р С—РЎР‚Р В°РЎв‚¬Р С‘Р Р†Р В°Р ВµРЎвЂљ РЎРѓР С—Р С‘РЎРѓР С•Р С” Р СР ВµРЎвЂљР С•Р Т‘Р С•Р Р† Р С•Р С—Р В»Р В°РЎвЂљРЎвЂ№
@@ -99,7 +99,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     // ====================
     // Р ВР СњР Р„Р вЂўР С™Р В¦Р ВР В Set API
     // ====================
-    
+
     @Inject
     private Logger log;
 
@@ -123,7 +123,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     // ====================
     // Р С™Р С›Р СњР В¤Р ВР вЂњР Р€Р В Р С’Р В¦Р ВР Р‡
     // ====================
-    
+
     private String baseUrl;
     private String deviceToken;
     private String language;
@@ -137,7 +137,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     // ====================
     // Р РЋР С›Р РЋР СћР С›Р Р‡Р СњР ВР вЂў Р СџР вЂєР С’Р СћР вЂўР вЂ“Р С’
     // ====================
-    
+
     private volatile String currentPaymentId;
     private volatile String currentPaymentCode;
     private volatile String currentMethodId;
@@ -193,15 +193,15 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         new Thread(() -> {
             try {
                 List<PaymentMethod> methods = fetchPaymentMethods();
-                
+
                 if (methods.isEmpty()) {
-                    SwingUtilities.invokeLater(() -> 
+                    SwingUtilities.invokeLater(() ->
                         showErrorAndAbort(getString("error.no.methods", "Р СњР ВµРЎвЂљ Р Т‘Р С•РЎРѓРЎвЂљРЎС“Р С—Р Р…РЎвЂ№РЎвЂ¦ Р СР ВµРЎвЂљР С•Р Т‘Р С•Р Р† Р С•Р С—Р В»Р В°РЎвЂљРЎвЂ№"), callback));
                     return;
                 }
 
                 log.info("[SBGPay] Loaded {} payment methods", methods.size());
-                SwingUtilities.invokeLater(() -> 
+                SwingUtilities.invokeLater(() ->
                     showMethodSelectionForm(methods, callback, receipt, amount));
 
             } catch (Exception e) {
@@ -490,25 +490,25 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     @Override
     public Feedback eventReceiptFiscalized(Receipt receipt, boolean isCancelReceipt) {
         loadConfiguration();
-        
+
         if (receipt == null) {
             log.debug("[SBGPay] eventReceiptFiscalized: receipt is null");
             return null;
         }
-        
+
         if (isCancelReceipt) {
             log.debug("[SBGPay] eventReceiptFiscalized: cancel receipt, skipping complete");
             return null;
         }
-        
+
         log.info("[SBGPay] ===== RECEIPT FISCALIZED =====");
-        
+
         Collection<ProcessedPayment> payments = receipt.getPayments();
         if (payments == null || payments.isEmpty()) {
             log.debug("[SBGPay] eventReceiptFiscalized: no payments in receipt");
             return null;
         }
-        
+
         // Р РЋР С•Р В±Р С‘РЎР‚Р В°Р ВµР С Р Р†РЎРѓР Вµ paymentId Р С•РЎвЂљ SBG Pay
         List<String> sbgPaymentIds = new ArrayList<>();
         for (ProcessedPayment payment : payments) {
@@ -520,14 +520,14 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
 				}
 			}
         }
-        
+
         if (sbgPaymentIds.isEmpty()) {
             log.debug("[SBGPay] eventReceiptFiscalized: no SBG Pay payments found");
             return null;
         }
-        
+
         log.info("[SBGPay] Found {} SBG Pay payment(s) to complete", sbgPaymentIds.size());
-        
+
         // Р СџРЎвЂ№РЎвЂљР В°Р ВµР СРЎРѓРЎРЏ Р С•РЎвЂљР С—РЎР‚Р В°Р Р†Р С‘РЎвЂљРЎРЉ /complete Р Т‘Р В»РЎРЏ Р С”Р В°Р В¶Р Т‘Р С•Р С–Р С• Р С—Р В»Р В°РЎвЂљР ВµР В¶Р В°
         List<String> failedPaymentIds = new ArrayList<>();
         for (String paymentId : sbgPaymentIds) {
@@ -539,12 +539,12 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 failedPaymentIds.add(paymentId);
             }
         }
-        
+
         if (failedPaymentIds.isEmpty()) {
             log.info("[SBGPay] All payments completed successfully");
             return null;
         }
-        
+
         // Р вЂ™Р С•Р В·Р Р†РЎР‚Р В°РЎвЂ°Р В°Р ВµР С Feedback Р Т‘Р В»РЎРЏ Р С—Р С•Р Р†РЎвЂљР С•РЎР‚Р Р…Р С•Р в„– Р С•РЎвЂљР С—РЎР‚Р В°Р Р†Р С”Р С‘
         log.warn("[SBGPay] {} payment(s) failed to complete, scheduling retry", failedPaymentIds.size());
         String payload = String.join(",", failedPaymentIds);
@@ -559,21 +559,21 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         if (feedback == null || feedback.getPayload() == null || feedback.getPayload().isEmpty()) {
             return;
         }
-        
+
         loadConfiguration();
-        
+
         String payload = feedback.getPayload();
         String[] paymentIds = payload.split(",");
-        
+
         log.info("[SBGPay] onRepeatSend: retrying {} payment(s)", paymentIds.length);
-        
+
         List<String> stillFailed = new ArrayList<>();
         for (String paymentId : paymentIds) {
             if (paymentId == null || paymentId.trim().isEmpty()) {
                 continue;
             }
             paymentId = paymentId.trim();
-            
+
             try {
                 completePaymentOnServer(paymentId);
                 log.info("[SBGPay] Complete retry successful for paymentId={}", paymentId);
@@ -582,13 +582,13 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 stillFailed.add(paymentId);
             }
         }
-        
+
         if (!stillFailed.isEmpty()) {
             // Р С›Р В±Р Р…Р С•Р Р†Р В»РЎРЏР ВµР С payload РЎвЂљР С•Р В»РЎРЉР С”Р С• РЎРѓ Р Р…Р ВµРЎС“Р Т‘Р В°Р Р†РЎв‚¬Р С‘Р СР С‘РЎРѓРЎРЏ
             feedback.setPayload(String.join(",", stillFailed));
             throw new Exception("Failed to complete " + stillFailed.size() + " payment(s): " + stillFailed);
         }
-        
+
         log.info("[SBGPay] All retried payments completed successfully");
     }
 
@@ -605,10 +605,10 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                                          BigDecimal amount) {
         // Р РЋР С•РЎвЂ¦РЎР‚Р В°Р Р…РЎРЏР ВµР С Р Т‘Р В»РЎРЏ Р Р†Р С•Р В·Р СР С•Р В¶Р Р…Р С•РЎРѓРЎвЂљР С‘ Р Р†Р С•Р В·Р Р†РЎР‚Р В°РЎвЂљР В° Р С—РЎР‚Р С‘ Р С•РЎвЂљР СР ВµР Р…Р Вµ Р Р†Р Р†Р С•Р Т‘Р В° РЎРѓРЎС“Р СР СРЎвЂ№
         this.cachedMethods = methods;
-        
+
         // Р В¤Р С•РЎР‚Р СР С‘РЎР‚РЎС“Р ВµР С Р Т‘Р В°Р Р…Р Р…РЎвЂ№Р Вµ Р Т‘Р В»РЎРЏ РЎвЂљР В°Р В±Р В»Р С‘РЎвЂ РЎвЂ№ Р Р†РЎвЂ№Р В±Р С•РЎР‚Р В°
         Map<String, List<String>> items = new LinkedHashMap<>();
-        
+
         for (PaymentMethod method : methods) {
             List<String> columns = new ArrayList<>();
             columns.add(method.name != null ? method.name : method.methodId);
@@ -625,7 +625,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                     @Override
                     public void eventInputComplete(String selectedMethodId) {
                         log.info("[SBGPay] Selected method: {}", selectedMethodId);
-                        
+
                         PaymentMethod selected = findMethodById(methods, selectedMethodId);
                         if (selected == null) {
                             showErrorAndAbort(getString("error.method.not.found", "Р СљР ВµРЎвЂљР С•Р Т‘ Р Р…Р Вµ Р Р…Р В°Р в„–Р Т‘Р ВµР Р…"), callback);
@@ -660,9 +660,9 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                                       PaymentCallback callback,
                                       Receipt receipt,
                                       BigDecimal defaultSum) {
-        
+
         String title = method.name != null && !method.name.isEmpty()
-            ? method.name 
+            ? method.name
             : getString("payment.name", "SBG Pay");
 
         SumToPayFormParameters parameters = new SumToPayFormParameters(title, receipt);
@@ -680,7 +680,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 @Override
                 public void eventSumEntered(BigDecimal enteredAmount) {
                     log.info("[SBGPay] Amount entered: {}", enteredAmount);
-                    
+
                     // Р вЂ™Р В°Р В»Р С‘Р Т‘Р В°РЎвЂ Р С‘РЎРЏ РЎРѓРЎС“Р СР СРЎвЂ№ Р С—Р С• Р В»Р С‘Р СР С‘РЎвЂљР В°Р С Р СР ВµРЎвЂљР С•Р Т‘Р В°
                     String validationError = validateAmountForMethod(enteredAmount, method);
                     if (validationError != null) {
@@ -704,17 +704,17 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
      */
     private String validateAmountForMethod(BigDecimal amount, PaymentMethod method) {
         long amountMinor = toMinorUnits(amount);
-        
+
         if (method.minAmount > 0 && amountMinor < method.minAmount) {
-            return getString("error.amount.too.small", "Р РЋРЎС“Р СР СР В° Р СР ВµР Р…РЎРЉРЎв‚¬Р Вµ Р СР С‘Р Р…Р С‘Р СР В°Р В»РЎРЉР Р…Р С•Р в„–: ") 
+            return getString("error.amount.too.small", "Р РЋРЎС“Р СР СР В° Р СР ВµР Р…РЎРЉРЎв‚¬Р Вµ Р СР С‘Р Р…Р С‘Р СР В°Р В»РЎРЉР Р…Р С•Р в„–: ")
                 + fromMinorUnits(method.minAmount) + " " + currency;
         }
-        
+
         if (method.maxAmount > 0 && amountMinor > method.maxAmount) {
-            return getString("error.amount.too.large", "Р РЋРЎС“Р СР СР В° Р В±Р С•Р В»РЎРЉРЎв‚¬Р Вµ Р СР В°Р С”РЎРѓР С‘Р СР В°Р В»РЎРЉР Р…Р С•Р в„–: ") 
+            return getString("error.amount.too.large", "Р РЋРЎС“Р СР СР В° Р В±Р С•Р В»РЎРЉРЎв‚¬Р Вµ Р СР В°Р С”РЎРѓР С‘Р СР В°Р В»РЎРЉР Р…Р С•Р в„–: ")
                 + fromMinorUnits(method.maxAmount) + " " + currency;
         }
-        
+
         return null;
     }
 
@@ -746,7 +746,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                                PaymentCallback callback,
                                Receipt receipt,
                                BigDecimal amount) {
-        
+
         paymentInProgress = true;
         currentMethodId = method.methodId;
         currentMethodName = method.name;
@@ -762,7 +762,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 currentPaymentCode = response.paymentCode;
                 final String initialQrData = response.qrCodeData;
 
-                log.info("[SBGPay] Payment created: id={}, code={}, status={}", 
+                log.info("[SBGPay] Payment created: id={}, code={}, status={}",
                     currentPaymentId, currentPaymentCode, response.status);
 
                 SwingUtilities.invokeLater(() -> {
@@ -823,7 +823,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 if (remainingMs <= 0) {
                     log.warn("[SBGPay] Payment timeout after {}ms", elapsed);
                     stopStatusPolling();
-                    SwingUtilities.invokeLater(() -> 
+                    SwingUtilities.invokeLater(() ->
                         showErrorAndAbort(getString("error.timeout", "Р вЂ™РЎР‚Р ВµР СРЎРЏ Р С•Р В¶Р С‘Р Т‘Р В°Р Р…Р С‘РЎРЏ Р С•Р С—Р В»Р В°РЎвЂљРЎвЂ№ Р С‘РЎРѓРЎвЂљР ВµР С”Р В»Р С•"), callback));
                     return;
                 }
@@ -845,14 +845,14 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                     log.info("[SBGPay] Payment completed successfully");
                     stopStatusPolling();
                     SwingUtilities.invokeLater(() -> completePaymentFlow(callback, amount, status));
-                    
+
                 } else if (isFailedStatus(status.status)) {
                     String errorDetail = status.errorMessage != null && !status.errorMessage.isEmpty()
-                        ? status.errorMessage 
+                        ? status.errorMessage
                         : status.status;
                     log.warn("[SBGPay] Payment failed: status={}, error={}", status.status, status.errorMessage);
                     stopStatusPolling();
-                    SwingUtilities.invokeLater(() -> 
+                    SwingUtilities.invokeLater(() ->
                         showErrorAndAbort(getString("error.payment.failed", "Р С›Р С—Р В»Р В°РЎвЂљР В° Р Р…Р Вµ Р Р†РЎвЂ№Р С—Р С•Р В»Р Р…Р ВµР Р…Р В°: ") + errorDetail, callback));
                 }
 
@@ -916,7 +916,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         paymentInProgress = false;
 
         String title = currentMethodName != null && !currentMethodName.isEmpty()
-            ? currentMethodName 
+            ? currentMethodName
             : "SBG Pay";
         String completedPaymentId = resolveCompletedPaymentId(status);
         String completedPaymentCode = resolveCompletedPaymentCode(status);
@@ -926,7 +926,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
 
         Payment payment = new Payment();
         payment.setSum(amount);
-        
+
         // Р РЋР С•РЎвЂ¦РЎР‚Р В°Р Р…РЎРЏР ВµР С Р Т‘Р В°Р Р…Р Р…РЎвЂ№Р Вµ Р Т‘Р В»РЎРЏ Р С‘РЎРѓР С—Р С•Р В»РЎРЉР В·Р С•Р Р†Р В°Р Р…Р С‘РЎРЏ Р Р† eventReceiptFiscalized
         payment.getData().put("sbgpay.paymentId", nullToEmpty(completedPaymentId));
         payment.getData().put("sbgpay.paymentCode", nullToEmpty(completedPaymentCode));
@@ -935,7 +935,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         payment.getData().put("sbgpay.status", nullToEmpty(status.status));
 
         log.info("[SBGPay] ===== PAYMENT FLOW COMPLETED =====");
-        log.info("[SBGPay] paymentId={}, method={}, status={}, amount={}", 
+        log.info("[SBGPay] paymentId={}, method={}, status={}, amount={}",
             completedPaymentId, currentMethodName, status.status, amount);
         log.info("[SBGPay] Stored paymentId in receipt data: key='sbgpay.paymentId', value={}", completedPaymentId);
 
@@ -1093,50 +1093,50 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
      */
     private List<PaymentMethod> fetchPaymentMethods() throws Exception {
         String url = baseUrl + "/api/v1/payment-methods?lang=" + urlEncode(language) + "&currency=" + urlEncode(currency);
-        
+
         JsonNode root = httpGet(url);
         List<PaymentMethod> methods = new ArrayList<>();
 
         log.debug("[SBGPay] Raw payment-methods response: {}", root.toString());
-        
+
         JsonNode methodsArray = root.get("methods");
         if (methodsArray == null && root.isArray()) {
             log.debug("[SBGPay] Response is array directly (no 'methods' wrapper)");
             methodsArray = root;
         }
-        
+
         if (methodsArray == null) {
             log.warn("[SBGPay] No 'methods' field in response. Keys: {}", root.fieldNames());
             return methods;
         }
-        
+
         if (!methodsArray.isArray()) {
             log.warn("[SBGPay] 'methods' is not an array: {}", methodsArray.getNodeType());
             return methods;
         }
-        
+
         log.debug("[SBGPay] Found {} items in methods array", methodsArray.size());
         for (JsonNode node : methodsArray) {
             PaymentMethod m = new PaymentMethod();
-            
+
             m.methodId = getText(node, "methodId");
             if (m.methodId == null || m.methodId.isEmpty()) {
                 m.methodId = getText(node, "id");
             }
-            
+
             m.name = getText(node, "name");
             if (m.name == null || m.name.isEmpty()) {
                 m.name = getText(node, "title");
             }
-            
+
             m.description = getText(node, "description");
             m.kind = getText(node, "kind");
             m.iconUrl = getText(node, "iconUrl");
             m.currency = getText(node, "currency");
-            
+
             m.minAmount = getLong(node, "minAmount", 0);
             m.maxAmount = getLong(node, "maxAmount", 0);
-            
+
             JsonNode providerNode = node.get("provider");
             if (providerNode != null) {
                 if (providerNode.isObject()) {
@@ -1163,8 +1163,8 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     /**
      * POST /api/v1/payments
      */
-    private CreatePaymentResponse createPaymentOnServer(PaymentMethod method, 
-                                                         Receipt receipt, 
+    private CreatePaymentResponse createPaymentOnServer(PaymentMethod method,
+                                                         Receipt receipt,
                                                          BigDecimal amount) throws Exception {
         String url = baseUrl + "/api/v1/payments";
         String idempotencyKey = UUID.randomUUID().toString();
@@ -1184,11 +1184,11 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         body.put("ttlSeconds", ttlSeconds);
         body.put("lang", language);
 
-        log.debug("[SBGPay] Receipt check: sendReceipt={}, lineItems={}, isEmpty={}", 
-            sendReceipt, 
+        log.debug("[SBGPay] Receipt check: sendReceipt={}, lineItems={}, isEmpty={}",
+            sendReceipt,
             receipt.getLineItems() != null ? receipt.getLineItems().size() : "null",
             receipt.getLineItems() != null ? receipt.getLineItems().isEmpty() : "null");
-        
+
         if (sendReceipt && receipt.getLineItems() != null && !receipt.getLineItems().isEmpty()) {
             Map<String, Object> receiptObj = buildReceiptObject(receipt);
             body.put("receipt", receiptObj);
@@ -1202,12 +1202,12 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         CreatePaymentResponse result = new CreatePaymentResponse();
         result.paymentId = getText(response, "paymentId");
         if (result.paymentId == null) result.paymentId = getText(response, "id");
-        
+
         result.paymentCode = getText(response, "paymentCode");
         if (result.paymentCode == null) result.paymentCode = getText(response, "code");
-        
+
         result.status = getText(response, "status");
-        
+
         result.qrCodeData = getQrFromResponse(response);
 
         if (result.paymentId == null || result.paymentId.isEmpty()) {
@@ -1222,20 +1222,20 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
      */
     private PaymentStatus fetchPaymentStatus(String paymentId, int timeoutMs) throws Exception {
         String url = baseUrl + "/api/v1/payments/" + urlEncode(paymentId) + "/status";
-        
+
         JsonNode response = httpGet(url, timeoutMs);
-        
+
         log.debug("[SBGPay] Status response: {}", response.toString());
 
         PaymentStatus status = new PaymentStatus();
         status.paymentId = getText(response, "paymentId");
         status.paymentCode = getText(response, "paymentCode");
         status.status = getText(response, "status");
-        
+
         status.qrPayload = getText(response, "qrPayload");
-        
+
         status.qrCodeData = getText(response, "qrCodeData");
-        
+
         status.errorMessage = getText(response, "errorMessage");
         if (status.errorMessage == null) {
             status.errorMessage = getText(response, "error");
@@ -1473,22 +1473,22 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
      */
     private Map<String, Object> buildReceiptObject(Receipt receipt) {
         Map<String, Object> receiptObj = new LinkedHashMap<>();
-        
+
         List<Map<String, Object>> items = new ArrayList<>();
         int lineId = 1;
-        
+
         for (LineItem item : receipt.getLineItems()) {
             Map<String, Object> itemObj = new LinkedHashMap<>();
             itemObj.put("lineId", String.valueOf(lineId++));
-            
+
             Merchandise merchandise = item.getMerchandise();
             if (merchandise != null) {
                 itemObj.put("name", nullToEmpty(merchandise.getName()));
                 itemObj.put("sku", nullToEmpty(merchandise.getMarking()));
-                
+
                 String barcode = merchandise.getBarcode();
                 itemObj.put("barcode", barcode != null && !barcode.isEmpty() ? barcode : null);
-                
+
                 itemObj.put("price", toMinorUnits(merchandise.getPrice()));
             } else {
                 itemObj.put("name", "Unknown");
@@ -1496,17 +1496,17 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 itemObj.put("barcode", null);
                 itemObj.put("price", 0L);
             }
-            
+
             itemObj.put("qty", item.getQuantity() / 1000.0);
             itemObj.put("total", toMinorUnits(item.getSum()));
-            
+
             // Р вЂќР С•Р В±Р В°Р Р†Р В»РЎРЏР ВµР С Р ВµР Т‘Р С‘Р Р…Р С‘РЎвЂ РЎС“ Р С‘Р В·Р СР ВµРЎР‚Р ВµР Р…Р С‘РЎРЏ
             String unit = mapMeasureUnit(item);
             itemObj.put("unit", unit);
-            
+
             items.add(itemObj);
         }
-        
+
         receiptObj.put("items", items);
         return receiptObj;
     }
@@ -1527,36 +1527,36 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 default: break;
             }
         }
-        
+
         // Р СџРЎР‚Р С•Р В±РЎС“Р ВµР С Р С—Р С• Р Р…Р В°Р В·Р Р†Р В°Р Р…Р С‘РЎР‹ Р ВµР Т‘Р С‘Р Р…Р С‘РЎвЂ РЎвЂ№ Р С‘Р В·Р СР ВµРЎР‚Р ВµР Р…Р С‘РЎРЏ
         String measureName = item.getMeasureName();
         if (measureName != null && !measureName.isEmpty()) {
             String nameLower = measureName.toLowerCase().trim();
-            
+
             // Р С™Р С‘Р В»Р С•Р С–РЎР‚Р В°Р СР С
-            if (nameLower.equals("Р С”Р С–") || nameLower.equals("Р С”Р С‘Р В»Р С•Р С–РЎР‚Р В°Р СР С") || 
+            if (nameLower.equals("Р С”Р С–") || nameLower.equals("Р С”Р С‘Р В»Р С•Р С–РЎР‚Р В°Р СР С") ||
                 nameLower.equals("kg") || nameLower.equals("kilogram")) {
                 return "kg";
             }
-            
+
             // Р вЂњРЎР‚Р В°Р СР С
-            if (nameLower.equals("Р С–") || nameLower.equals("Р С–РЎР‚Р В°Р СР С") || 
+            if (nameLower.equals("Р С–") || nameLower.equals("Р С–РЎР‚Р В°Р СР С") ||
                 nameLower.equals("g") || nameLower.equals("gr") || nameLower.equals("gram")) {
                 return "g";
             }
-            
+
             // Р вЂєР С‘РЎвЂљРЎР‚
-            if (nameLower.equals("Р В»") || nameLower.equals("Р В»Р С‘РЎвЂљРЎР‚") || 
+            if (nameLower.equals("Р В»") || nameLower.equals("Р В»Р С‘РЎвЂљРЎР‚") ||
                 nameLower.equals("l") || nameLower.equals("liter") || nameLower.equals("litr")) {
                 return "l";
             }
-            
+
             // Р СљР ВµРЎвЂљРЎР‚
-            if (nameLower.equals("Р С") || nameLower.equals("Р СР ВµРЎвЂљРЎР‚") || 
+            if (nameLower.equals("Р С") || nameLower.equals("Р СР ВµРЎвЂљРЎР‚") ||
                 nameLower.equals("m") || nameLower.equals("meter") || nameLower.equals("metr")) {
                 return "m";
             }
-            
+
             // Р РЃРЎвЂљРЎС“Р С”Р С‘ (РЎР‚РЎС“РЎРѓРЎРѓР С”Р С‘Р в„–, РЎС“Р В·Р В±Р ВµР С”РЎРѓР С”Р С‘Р в„– Р С”Р С‘РЎР‚Р С‘Р В»Р В»Р С‘РЎвЂ Р В°, РЎС“Р В·Р В±Р ВµР С”РЎРѓР С”Р С‘Р в„– Р В»Р В°РЎвЂљР С‘Р Р…Р С‘РЎвЂ Р В°, Р В°Р Р…Р С–Р В»Р С‘Р в„–РЎРѓР С”Р С‘Р в„–)
             if (nameLower.equals("РЎв‚¬РЎвЂљ") || nameLower.equals("РЎв‚¬РЎвЂљРЎС“Р С”Р В°") || nameLower.equals("РЎв‚¬РЎвЂљРЎС“Р С”Р С‘") ||
                 nameLower.equals("Р Т‘Р С•Р Р…Р В°") ||                          // РЎС“Р В·Р В±Р ВµР С”РЎРѓР С”Р С‘Р в„– Р С”Р С‘РЎР‚Р С‘Р В»Р В»Р С‘РЎвЂ Р В°
@@ -1565,9 +1565,9 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 return "pcs";
             }
         }
-        
+
         // Р СџР С• РЎС“Р СР С•Р В»РЎвЂЎР В°Р Р…Р С‘РЎР‹ РІР‚вЂќ РЎв‚¬РЎвЂљРЎС“Р С”Р С‘
-        log.debug("[SBGPay] Unknown measure unit: rcumCode={}, measureName={}, defaulting to 'pcs'", 
+        log.debug("[SBGPay] Unknown measure unit: rcumCode={}, measureName={}, defaulting to 'pcs'",
             rcumCode, measureName);
         return "pcs";
     }
@@ -1583,7 +1583,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     private JsonNode httpGet(String url, int timeoutMs) throws Exception {
         long startTime = System.currentTimeMillis();
         int effectiveTimeoutMs = timeoutMs > 0 ? timeoutMs : DEFAULT_HTTP_TIMEOUT_MS;
-        
+
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
         conn.setRequestMethod("GET");
         conn.setRequestProperty("Device-Token", deviceToken);
@@ -1594,7 +1594,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         try {
             int status = conn.getResponseCode();
             String body = readResponseBody(conn, status);
-            
+
             long elapsed = System.currentTimeMillis() - startTime;
             log.debug("[HTTP] GET {} -> {} ({}ms, timeout={}ms)", url, status, elapsed, effectiveTimeoutMs);
 
@@ -1617,7 +1617,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                               String idempotencyKey,
                               boolean withBody) throws Exception {
         long startTime = System.currentTimeMillis();
-        
+
         HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
         conn.setRequestMethod("POST");
         conn.setRequestProperty("Device-Token", deviceToken);
@@ -1644,10 +1644,10 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         try {
             int status = conn.getResponseCode();
             String responseBody = readResponseBody(conn, status);
-            
+
             long elapsed = System.currentTimeMillis() - startTime;
             log.debug("[HTTP] POST {} -> {} ({}ms)", url, status, elapsed);
-            
+
             log.debug("[HTTP] POST {} Response body: {}", url, responseBody);
 
             if (status >= 400) {
@@ -1663,7 +1663,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     private String readResponseBody(HttpURLConnection conn, int status) throws Exception {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(
                 status < 400 ? conn.getInputStream() : conn.getErrorStream(), StandardCharsets.UTF_8))) {
-            
+
             StringBuilder sb = new StringBuilder();
             String line;
             while ((line = reader.readLine()) != null) {
@@ -1676,7 +1676,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     private void handleHttpError(int status, String body) throws Exception {
         String detail = "HTTP " + status;
         String title = null;
-        
+
         try {
             JsonNode error = objectMapper.readTree(body);
             if (error.has("detail")) {
@@ -1772,12 +1772,12 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
 
         try {
             boolean canShowQr = customerDisplay.canShowQr();
-            
+
             String title = currentMethodName != null && !currentMethodName.isEmpty()
-                ? currentMethodName 
+                ? currentMethodName
                 : "SBG Pay";
-            
-            log.info("[SBGPay] Showing QR on customer display: canShowQr={}, title={}, qrData.length={}", 
+
+            log.info("[SBGPay] Showing QR on customer display: canShowQr={}, title={}, qrData.length={}",
                 canShowQr, title, qrCodeData.length());
 
             customerDisplay.clear();
@@ -1795,7 +1795,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
 
                 Duration displayDuration = Duration.ofSeconds(Math.min(ttlSeconds, pollTimeoutSeconds));
                 CustomerDisplayMessage displayMessage = new CustomerDisplayMessage(message, displayDuration);
-                
+
                 customerDisplay.display(displayMessage);
                 log.info("[SBGPay] QR displayed on customer display");
             } else {
@@ -1884,7 +1884,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 log.trace("[SBGPay] Service property keys: {}", safePropertyKeys(serviceProps));
                 log.trace("[SBGPay] Plugin property keys: {}", safePropertyKeys(pluginProps));
             }
-            
+
             baseUrl = readStringOption(serviceProps, pluginProps, "sbgpay.baseUrl", "https://sbg.amasia.io/pos", verboseDebug);
             deviceToken = readStringOption(serviceProps, pluginProps, "sbgpay.deviceToken", null, verboseDebug);
             language = readStringOption(serviceProps, pluginProps, "sbgpay.lang", "ru", verboseDebug);
@@ -2329,7 +2329,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     }
 
     private boolean isFailedStatus(String status) {
-        return "failed".equalsIgnoreCase(status) 
+        return "failed".equalsIgnoreCase(status)
             || "declined".equalsIgnoreCase(status)
             || "cancelled".equalsIgnoreCase(status)
             || "canceled".equalsIgnoreCase(status)
