@@ -24,6 +24,7 @@ import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import ru.crystals.pos.api.comm.CommunicationMessage;
 import ru.crystals.pos.api.plugin.PaymentPlugin;
@@ -89,6 +90,10 @@ import ru.crystals.pos.spi.ui.payment.SumToPayFormParameters;
 public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlugin, TransactionalRefundPlugin {
 
     private static final int DEFAULT_HTTP_TIMEOUT_MS = 30000;
+    private static final AtomicReference<String> LAST_CONFIG_SNAPSHOT =
+        new AtomicReference<>();
+    private static final AtomicReference<String> LAST_AVAILABILITY_SNAPSHOT =
+        new AtomicReference<>();
 
     // ====================
     // Р ВР СњР Р„Р вЂўР С™Р В¦Р ВР В Set API
@@ -127,7 +132,6 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     private int pollTimeoutSeconds;
     private boolean sendReceipt;
     private volatile SbgPayHttpClient httpClient;
-    private volatile String lastLoggedConfigSnapshot;
 
     // ====================
     // Р РЋР С›Р РЋР СћР С›Р Р‡Р СњР ВР вЂў Р СџР вЂєР С’Р СћР вЂўР вЂ“Р С’
@@ -149,12 +153,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     @Override
     public boolean isAvailable() {
         loadConfiguration(false);
-
-        boolean available = hasRequiredConfiguration();
-        if (available) {
-            log.debug("[SBGPay] isAvailable=true");
-        }
-        return available;
+        return hasRequiredConfiguration();
     }
 
     @Override
@@ -1647,15 +1646,10 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     }
 
     private boolean hasRequiredConfiguration() {
-        if (!hasText(baseUrl)) {
-            log.info("[SBGPay] isAvailable=false: baseUrl not configured");
-            return false;
-        }
-        if (!hasText(deviceToken)) {
-            log.info("[SBGPay] isAvailable=false: deviceToken not configured");
-            return false;
-        }
-        return true;
+        String unavailableReason = getUnavailableConfigurationReason();
+        boolean available = unavailableReason == null;
+        logAvailabilityIfChanged(available, unavailableReason);
+        return available;
     }
 
     private void applyConfiguration(SbgPayConfiguration config) {
@@ -1673,9 +1667,43 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
 
     private void logConfigurationIfChanged(SbgPayConfiguration config) {
         String snapshot = config.snapshot();
-        if (!snapshot.equals(lastLoggedConfigSnapshot)) {
-            lastLoggedConfigSnapshot = snapshot;
+        if (updateSnapshotIfChanged(LAST_CONFIG_SNAPSHOT, snapshot)) {
             log.debug("[SBGPay] Config: {}", snapshot);
+        }
+    }
+
+    private String getUnavailableConfigurationReason() {
+        if (!hasText(baseUrl)) {
+            return "baseUrl not configured";
+        }
+        if (!hasText(deviceToken)) {
+            return "deviceToken not configured";
+        }
+        return null;
+    }
+
+    private void logAvailabilityIfChanged(boolean available, String unavailableReason) {
+        String snapshot = available ? "available" : "unavailable:" + unavailableReason;
+        if (!updateSnapshotIfChanged(LAST_AVAILABILITY_SNAPSHOT, snapshot)) {
+            return;
+        }
+
+        if (available) {
+            log.debug("[SBGPay] isAvailable=true");
+            return;
+        }
+        log.info("[SBGPay] isAvailable=false: {}", unavailableReason);
+    }
+
+    private boolean updateSnapshotIfChanged(AtomicReference<String> snapshotHolder, String newSnapshot) {
+        while (true) {
+            String currentSnapshot = snapshotHolder.get();
+            if (newSnapshot.equals(currentSnapshot)) {
+                return false;
+            }
+            if (snapshotHolder.compareAndSet(currentSnapshot, newSnapshot)) {
+                return true;
+            }
         }
     }
 
