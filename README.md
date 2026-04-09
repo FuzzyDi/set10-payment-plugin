@@ -25,7 +25,7 @@ mvn clean package
 
 2. Скопируйте JAR файл в папку плагинов Set Retail 10:
 ```
-plugins/sbgpay-payment-plugin-2.0.0.jar
+plugins/SBGPayPaymentPlugin-2.0.0.jar
 ```
 
 3. Перезапустите кассу
@@ -54,7 +54,7 @@ plugins/sbgpay-payment-plugin-2.0.0.jar
 4. POST /api/v1/payments → создание платежа
 5. GET /api/v1/payments/{id}/status → получение qrPayload
 6. QR-код отображается на дисплее покупателя
-7. Polling статуса до completed/failed/expired
+7. Polling статуса до paid/completed/failed/expired
 8. Платёж завершается
 ```
 
@@ -66,6 +66,19 @@ plugins/sbgpay-payment-plugin-2.0.0.jar
 - `sbgpay.methodId` — ID метода оплаты
 - `sbgpay.methodName` — Название метода (Click, Payme, etc.)
 - `sbgpay.status` — Финальный статус
+
+Для операций возврата:
+- `sbgpay.sourcePaymentId` — ID исходного платежа
+- `sbgpay.refundId` — ID reversal/refund (если возвращается API)
+- `sbgpay.refundCode` — Код reversal/refund (если возвращается API)
+- `sbgpay.refundStatus` — Статус возврата
+
+## Возврат (Refund/Reversal)
+
+Возврат выполняется одним запросом:
+`POST /api/v1/payments/{id}/reversal` (без body).
+
+`{id}` — исходный `sbgpay.paymentId` из оригинальной оплаты.
 
 ## Формат receipt.items
 

@@ -18,7 +18,6 @@
     <entry key="option.pollDelayMs">Интервал опроса статуса (мс)</entry>
     <entry key="option.pollTimeoutSeconds">Таймаут ожидания оплаты (сек.)</entry>
     <entry key="option.sendReceipt">Отправлять детали чека в API</entry>
-    <entry key="option.qrUrlTemplate">Шаблон URL для QR кода</entry>
 
     <!-- Сохраняемые поля платежа -->
     <entry key="field.paymentId">ID платежа</entry>
@@ -26,6 +25,10 @@
     <entry key="field.methodId">Метод оплаты</entry>
     <entry key="field.methodName">Название метода</entry>
     <entry key="field.status">Статус</entry>
+    <entry key="field.sourcePaymentId">ID исходного платежа</entry>
+    <entry key="field.refundId">ID возврата</entry>
+    <entry key="field.refundCode">Код возврата</entry>
+    <entry key="field.refundStatus">Статус возврата</entry>
 
     <!-- ==================== -->
     <!-- Строки для плагина   -->
@@ -55,18 +58,24 @@
     <entry key="amount">К оплате: </entry>
 
     <!-- Результаты -->
-    <entry key="payment.confirming">Подтверждение...</entry>
     <entry key="payment.success">Оплата успешна!</entry>
-    <entry key="payment.confirm.error">Ошибка подтверждения</entry>
-    <entry key="error.confirm.payment">Ошибка подтверждения платежа: </entry>
     <entry key="error.timeout">Время ожидания оплаты истекло</entry>
     <entry key="error.payment.failed">Оплата не выполнена: </entry>
 
     <!-- Возврат -->
-    <entry key="refund.not.supported">Возврат через SBG Pay не поддерживается</entry>
+    <entry key="refund.creating">Создание возврата...</entry>
+    <entry key="refund.success">Возврат выполнен</entry>
+    <entry key="refund.failed">Возврат не выполнен: </entry>
+    <entry key="refund.create.error">Ошибка создания возврата: </entry>
+    <entry key="refund.source.missing">Не найден исходный paymentId для возврата</entry>
+    <entry key="refund.amount.invalid">Некорректная сумма возврата</entry>
+    <entry key="refund.partial.not.supported">Частичный возврат не поддерживается: SBG reversal принимает только полную сумму исходной оплаты</entry>
 
     <!-- Ошибки HTTP -->
     <entry key="error.unauthorized">Ошибка авторизации: проверьте Device-Token</entry>
     <entry key="error.rate.limit">Слишком много запросов, попробуйте позже</entry>
 
+    <entry key="error.communication">Нет связи с процессингом. Проверьте сеть и повторите операцию.</entry>
+    <entry key="error.processing.timeout">Превышено время ожидания ответа от процессинга. Повторите операцию.</entry>
+    <entry key="error.unknown">Неизвестная ошибка</entry>
 </properties>

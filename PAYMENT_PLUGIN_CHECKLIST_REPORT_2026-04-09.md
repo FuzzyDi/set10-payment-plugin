@@ -1,0 +1,71 @@
+# API Set10 Payment Checklist Report (2026-04-09)
+
+Проект: `F:\Projects\set10-payment-plugin`  
+Плагин: `uz.sbgpay.payment`
+
+## Сводка
+
+- `PASS`: 5
+- `PARTIAL`: 3
+- `N/A`: 4
+- `BLOCKED`: 11
+- `FAIL`: 0
+
+## Что проверено
+
+1. Сборка: `mvn clean test package`
+2. Юнит-тесты: `mvn test -DskipTests=false` (16/16)
+3. Валидация `metainf.xml`: `java -jar D:\Set10sdk\utils\MetainfValidator.jar src/main/resources/metainf.xml` (`Validation success.`)
+4. Проверка `MANIFEST.MF` в `target/SBGPayPaymentPlugin-2.0.0.jar` и `target/SBGPayPaymentPlugin-2.0.0-jar-with-dependencies.jar`
+
+## Статусы по чеклисту (1–23)
+
+Легенда:
+- `PASS` — подтверждено
+- `PARTIAL` — подтверждена только часть результата (обычно API-логика, но не кассовый/серверный контур)
+- `N/A` — не применимо к текущей реализации/ограничению API
+- `BLOCKED` — нужна проверка на стенде Set10 (сервер/касса/ФР/ОФД/ERP)
+
+| # | Статус | Комментарий |
+|---|---|---|
+| 1 | PASS | `MANIFEST.MF` приведен к требованиям tutorial: есть `Build-Date`, `Implementation-Version`, `Project`, `Build-Machine`, `Branch`, `Implementation-Vendor`, `Revision`, `Vendor-Email`. |
+| 2 | PASS | `metainf.xml` валиден (`MetainfValidator: Validation success`). |
+| 3 | PASS | Локализация содержит и тип оплаты, и процессинг (`payment.name`, `service.name`). |
+| 4 | N/A | В проекте целевой build-tool — Maven; чеклистовый пункт про Gradle не применим к данному пайплайну при наличии успешной Maven-сборки артефакта. |
+| 5 | BLOCKED | Требуется установка jar на сервер Set10 и проверка UI/типов оплат. |
+| 6 | BLOCKED | Требуется проверка соответствия экранов серверных настроек `ExternalService/Options`. |
+| 7 | N/A | В `PaymentPlugin` не используется отдельный блок `<Options>` (только параметры внешнего сервиса + стандартные флаги типа оплаты Set10). |
+| 8 | BLOCKED | Нужна проверка сохранения настроек в БД сервера Set10. |
+| 9 | BLOCKED | Нужна проверка доставки настроек на кассу после сохранения на сервере. |
+| 10 | BLOCKED | Нужна установка jar на кассу и проверка доступности типа оплаты после рестарта. |
+| 11 | BLOCKED | Нужна визуальная проверка длины отображаемого названия оплаты на кассе. |
+| 12 | PARTIAL | API-сценарий успешной оплаты подтвержден логами (`paid/completed`), но ФР/БД/ОФД — только стенд. |
+| 13 | BLOCKED | Нужен e2e тест аннулирования чека с частичной оплатой плагином. |
+| 14 | PARTIAL | Рефанд через `POST /payments/{id}/reversal` + polling до `refunded` подтвержден логами, но печать/ОФД/БД — стенд. |
+| 15 | N/A | Частичный возврат намеренно запрещен: API reversal работает от исходного `paymentId` и полной суммы. |
+| 16 | N/A | Произвольный возврат без исходного `paymentId` не поддерживается контрактом `POST /payments/{id}/reversal`. |
+| 17 | BLOCKED | Нужен сетевой стенд/эмуляция недоступности процессинга в момент оплаты. |
+| 18 | BLOCKED | Нужен стенд с искусственно медленным ответом процессинга. |
+| 19 | PARTIAL | В коде данные пишутся в `payment.getData()`, `PersistedField` объявлены; факт записи в БД кассы — только стенд. |
+| 20 | BLOCKED | Нужна проверка в “Операционном дне” сервера, что отображаются `visible=true` поля. |
+| 21 | BLOCKED | Нужна фактическая выгрузка в ERP и сверка `exportable=true` полей. |
+| 22 | PASS | Причины недоступности оплаты логируются на `INFO` (`isAvailable=false: ... not configured`). |
+| 23 | PASS | Описание бизнес-сценариев присутствует в документации проекта (`README.md`). |
+
+## Подтвержденные артефакты
+
+- `MANIFEST.MF` содержит:
+  - `Build-Date: 09.04.2026 09:30:35`
+  - `Implementation-Version: 2.0.0`
+  - `Project: SBG Pay Payment Plugin`
+  - `Build-Machine: SET`
+  - `Branch: main`
+  - `Revision: f1d4a52`
+  - `Implementation-Vendor: SBG (Soft Business Group)`
+  - `Vendor-Email: support@sbgpay.uz`
+- `metainf.xml` содержит необходимые `Options` и `PersistedField` для оплаты/возврата.
+
+## Дополнительно
+
+Подробный стендовый план закрытия `BLOCKED` пунктов: [SET10_STAND_E2E_TEST_PLAN_2026-04-09.md](/F:/Projects/set10-payment-plugin/SET10_STAND_E2E_TEST_PLAN_2026-04-09.md)
+

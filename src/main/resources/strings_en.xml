@@ -18,7 +18,6 @@
     <entry key="option.pollDelayMs">Status poll interval (ms)</entry>
     <entry key="option.pollTimeoutSeconds">Payment timeout (seconds)</entry>
     <entry key="option.sendReceipt">Send receipt details to API</entry>
-    <entry key="option.qrUrlTemplate">QR code URL template</entry>
 
     <!-- Persisted fields -->
     <entry key="field.paymentId">Payment ID</entry>
@@ -26,6 +25,10 @@
     <entry key="field.methodId">Payment Method</entry>
     <entry key="field.methodName">Method Name</entry>
     <entry key="field.status">Status</entry>
+    <entry key="field.sourcePaymentId">Source Payment ID</entry>
+    <entry key="field.refundId">Refund ID</entry>
+    <entry key="field.refundCode">Refund Code</entry>
+    <entry key="field.refundStatus">Refund Status</entry>
 
     <!-- ==================== -->
     <!-- Plugin strings       -->
@@ -55,18 +58,24 @@
     <entry key="amount">Amount: </entry>
 
     <!-- Results -->
-    <entry key="payment.confirming">Confirming...</entry>
     <entry key="payment.success">Payment successful!</entry>
-    <entry key="payment.confirm.error">Confirmation error</entry>
-    <entry key="error.confirm.payment">Failed to confirm payment: </entry>
     <entry key="error.timeout">Payment timeout</entry>
     <entry key="error.payment.failed">Payment failed: </entry>
 
     <!-- Refund -->
-    <entry key="refund.not.supported">Refund via SBG Pay is not supported</entry>
+    <entry key="refund.creating">Creating refund...</entry>
+    <entry key="refund.success">Refund completed</entry>
+    <entry key="refund.failed">Refund failed: </entry>
+    <entry key="refund.create.error">Refund creation error: </entry>
+    <entry key="refund.source.missing">Source paymentId was not found for refund</entry>
+    <entry key="refund.amount.invalid">Invalid refund amount</entry>
+    <entry key="refund.partial.not.supported">Partial refund is not supported: SBG reversal accepts only full original payment amount</entry>
 
     <!-- HTTP errors -->
     <entry key="error.unauthorized">Authorization error: check Device-Token</entry>
     <entry key="error.rate.limit">Too many requests, please try later</entry>
 
+    <entry key="error.communication">No connection to payment processing. Check network and retry.</entry>
+    <entry key="error.processing.timeout">Processing response timeout exceeded. Please retry.</entry>
+    <entry key="error.unknown">Unknown error</entry>
 </properties>
