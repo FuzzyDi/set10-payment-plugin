@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 
 import javax.swing.SwingUtilities;
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.math.BigDecimal;
@@ -899,7 +900,9 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         if (statusPoller != null) {
             try {
                 statusPoller.shutdownNow();
-            } catch (Exception ignored) {}
+            } catch (RuntimeException e) {
+                log.warn("[SBGPay] Error while stopping status poller", e);
+            }
             statusPoller = null;
             log.debug("[SBGPay] Status polling stopped");
         }
@@ -1147,7 +1150,8 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
 
             if (m.methodId != null && !m.methodId.isEmpty()) {
                 methods.add(m);
-                log.debug("[SBGPay] Parsed method: id={}, name={}, kind={}", m.methodId, m.name, m.kind);
+                log.debug("[SBGPay] Parsed method: id={}, name={}, kind={}, currency={}, providerCode={}, description={}, iconUrl={}",
+                    m.methodId, m.name, m.kind, m.currency, m.providerCode, m.description, m.iconUrl);
             } else {
                 log.warn("[SBGPay] Skipped method with empty methodId. Node: {}", node.toString());
             }
@@ -1248,7 +1252,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
      */
     private void completePaymentOnServer(String paymentId) throws Exception {
         PaymentStatus currentStatus = fetchPaymentStatus(paymentId, DEFAULT_HTTP_TIMEOUT_MS);
-        String status = currentStatus != null ? currentStatus.status : null;
+        String status = currentStatus.status;
 
         if ("completed".equalsIgnoreCase(status)) {
             log.info("[SBGPay] Complete skipped for paymentId={}: status already completed", paymentId);
@@ -1411,7 +1415,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
 
             int requestTimeoutMs = calculateStatusRequestTimeoutMs(remainingMs);
             PaymentStatus paymentStatus = fetchPaymentStatus(paymentId, requestTimeoutMs);
-            lastStatus = paymentStatus != null ? paymentStatus.status : null;
+            lastStatus = paymentStatus.status;
 
             log.debug("[SBGPay] Refund status poll: paymentId={}, status={}, elapsed={}ms, remaining={}ms, requestTimeout={}ms",
                 paymentId, lastStatus, elapsed, remainingMs, requestTimeoutMs);
@@ -1420,7 +1424,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 RefundResponse terminal = new RefundResponse();
                 terminal.refundId = paymentId;
                 terminal.status = lastStatus;
-                terminal.errorMessage = paymentStatus != null ? paymentStatus.errorMessage : null;
+                terminal.errorMessage = paymentStatus.errorMessage;
                 return terminal;
             }
 
@@ -1598,7 +1602,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 handleHttpError(status, body);
             }
 
-            return objectMapper.readTree(body != null ? body : "{}");
+            return objectMapper.readTree(body.isEmpty() ? "{}" : body);
         } finally {
             conn.disconnect();
         }
@@ -1650,7 +1654,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 handleHttpError(status, responseBody);
             }
 
-            return objectMapper.readTree(responseBody != null ? responseBody : "{}");
+            return objectMapper.readTree(responseBody.isEmpty() ? "{}" : responseBody);
         } finally {
             conn.disconnect();
         }
@@ -1683,7 +1687,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
             if (error.has("title")) {
                 title = error.get("title").asText();
             }
-        } catch (Exception ignored) {}
+        } catch (IOException ignored) {}
 
         if (status == 401) {
             throw new Exception(getString("error.unauthorized", "Р С›РЎв‚¬Р С‘Р В±Р С”Р В° Р В°Р Р†РЎвЂљР С•РЎР‚Р С‘Р В·Р В°РЎвЂ Р С‘Р С‘: Р С—РЎР‚Р С•Р Р†Р ВµРЎР‚РЎРЉРЎвЂљР Вµ Device-Token"));
@@ -1927,8 +1931,8 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         String serviceRaw = safeGetProperty(serviceProps, key);
         String pluginRaw = safeGetProperty(pluginProps, key);
 
-        Boolean serviceValue = parseBooleanConfigValue(serviceRaw);
-        Boolean pluginValue = parseBooleanConfigValue(pluginRaw);
+        Integer serviceValue = parseBooleanConfigValue(serviceRaw);
+        Integer pluginValue = parseBooleanConfigValue(pluginRaw);
 
         if (serviceValue == null && hasText(serviceRaw)) {
             logWarnSafe("[SBGPay] Invalid boolean config in service '{}'='{}'", key, serviceRaw);
@@ -1937,9 +1941,15 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
             logWarnSafe("[SBGPay] Invalid boolean config in plugin '{}'='{}'", key, pluginRaw);
         }
 
-        Boolean resolved = serviceValue != null ? serviceValue : pluginValue;
-        String source = serviceValue != null ? "service" : (pluginValue != null ? "plugin" : "default");
-        boolean resolvedValue = resolved != null ? resolved : defaultValue;
+        boolean resolvedValue = defaultValue;
+        String source = "default";
+        if (serviceValue != null) {
+            resolvedValue = serviceValue.intValue() == 1;
+            source = "service";
+        } else if (pluginValue != null) {
+            resolvedValue = pluginValue.intValue() == 1;
+            source = "plugin";
+        }
 
         if (verboseDebug && log.isTraceEnabled()) {
             log.trace("[SBGPay] Boolean option '{}': serviceRaw={}, pluginRaw={}, resolved={}, source={}",
@@ -2131,7 +2141,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         }
     }
 
-    private Boolean parseBooleanConfigValue(String rawValue) {
+    private Integer parseBooleanConfigValue(String rawValue) {
         if (rawValue == null) {
             return null;
         }
@@ -2143,11 +2153,11 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
 
         if ("true".equals(normalized) || "1".equals(normalized) || "yes".equals(normalized)
             || "y".equals(normalized) || "on".equals(normalized)) {
-            return Boolean.TRUE;
+            return Integer.valueOf(1);
         }
         if ("false".equals(normalized) || "0".equals(normalized) || "no".equals(normalized)
             || "n".equals(normalized) || "off".equals(normalized)) {
-            return Boolean.FALSE;
+            return Integer.valueOf(0);
         }
 
         return null;
@@ -2405,6 +2415,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         String status;
         String errorMessage;
     }
+
 }
 
 
