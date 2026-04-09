@@ -5,20 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 
 import javax.swing.SwingUtilities;
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.math.BigDecimal;
 import java.net.ConnectException;
-import java.net.HttpURLConnection;
 import java.net.NoRouteToHostException;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
-import java.net.URL;
 import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -133,6 +126,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     private int pollDelayMs;
     private int pollTimeoutSeconds;
     private boolean sendReceipt;
+    private volatile SbgPayHttpClient httpClient;
     private volatile String lastLoggedConfigSnapshot;
 
     // ====================
@@ -1224,22 +1218,16 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
 
         log.debug("[SBGPay] Status response: {}", response.toString());
 
+        SbgPayStatusMapper.PaymentStatusPayload payload =
+            SbgPayStatusMapper.mapPaymentStatus(response);
+
         PaymentStatus status = new PaymentStatus();
-        status.paymentId = getText(response, "paymentId");
-        status.paymentCode = getText(response, "paymentCode");
-        status.status = getText(response, "status");
-
-        status.qrPayload = getText(response, "qrPayload");
-
-        status.qrCodeData = getText(response, "qrCodeData");
-
-        status.errorMessage = getText(response, "errorMessage");
-        if (status.errorMessage == null) {
-            status.errorMessage = getText(response, "error");
-        }
-        if (status.errorMessage == null) {
-            status.errorMessage = getText(response, "message");
-        }
+        status.paymentId = payload.getPaymentId();
+        status.paymentCode = payload.getPaymentCode();
+        status.status = payload.getStatus();
+        status.qrPayload = payload.getQrPayload();
+        status.qrCodeData = payload.getQrCodeData();
+        status.errorMessage = payload.getErrorMessage();
 
         return status;
     }
@@ -1579,30 +1567,14 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     }
 
     private JsonNode httpGet(String url, int timeoutMs) throws Exception {
-        long startTime = System.currentTimeMillis();
-        int effectiveTimeoutMs = timeoutMs > 0 ? timeoutMs : DEFAULT_HTTP_TIMEOUT_MS;
-
-        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-        conn.setRequestMethod("GET");
-        conn.setRequestProperty("Device-Token", deviceToken);
-        conn.setRequestProperty("Accept", "application/json");
-        conn.setConnectTimeout(effectiveTimeoutMs);
-        conn.setReadTimeout(effectiveTimeoutMs);
-
         try {
-            int status = conn.getResponseCode();
-            String body = readResponseBody(conn, status);
-
-            long elapsed = System.currentTimeMillis() - startTime;
-            log.debug("[HTTP] GET {} -> {} ({}ms, timeout={}ms)", url, status, elapsed, effectiveTimeoutMs);
-
-            if (status >= 400) {
-                handleHttpError(status, body);
-            }
-
-            return objectMapper.readTree(body.isEmpty() ? "{}" : body);
-        } finally {
-            conn.disconnect();
+            return getHttpClient().get(url, timeoutMs);
+        } catch (SbgPayHttpClient.HttpStatusException e) {
+            throw new HttpStatusException(
+                e.getStatus(),
+                e.getTitle(),
+                e.getDetail()
+            );
         }
     }
 
@@ -1614,87 +1586,34 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                               Map<String, Object> body,
                               String idempotencyKey,
                               boolean withBody) throws Exception {
-        long startTime = System.currentTimeMillis();
-
-        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-        conn.setRequestMethod("POST");
-        conn.setRequestProperty("Device-Token", deviceToken);
-        conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("Idempotency-Key", idempotencyKey);
-        conn.setConnectTimeout(30000);
-        conn.setReadTimeout(30000);
-        if (withBody) {
-            conn.setRequestProperty("Content-Type", "application/json");
-            conn.setDoOutput(true);
-            Map<String, Object> effectiveBody = body != null ? body : Collections.emptyMap();
-            byte[] payload = objectMapper.writeValueAsBytes(effectiveBody);
-
-            log.debug("[HTTP] POST {} Request body: {}", url, new String(payload, StandardCharsets.UTF_8));
-
-            try (OutputStream os = conn.getOutputStream()) {
-                os.write(payload);
-            }
-        } else {
-            conn.setDoOutput(false);
-            log.debug("[HTTP] POST {} Request body: <empty>", url);
-        }
-
         try {
-            int status = conn.getResponseCode();
-            String responseBody = readResponseBody(conn, status);
-
-            long elapsed = System.currentTimeMillis() - startTime;
-            log.debug("[HTTP] POST {} -> {} ({}ms)", url, status, elapsed);
-
-            log.debug("[HTTP] POST {} Response body: {}", url, responseBody);
-
-            if (status >= 400) {
-                handleHttpError(status, responseBody);
-            }
-
-            return objectMapper.readTree(responseBody.isEmpty() ? "{}" : responseBody);
-        } finally {
-            conn.disconnect();
+            return getHttpClient().post(url, body, idempotencyKey, withBody);
+        } catch (SbgPayHttpClient.HttpStatusException e) {
+            throw new HttpStatusException(
+                e.getStatus(),
+                e.getTitle(),
+                e.getDetail()
+            );
         }
     }
 
-    private String readResponseBody(HttpURLConnection conn, int status) throws Exception {
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
-                status < 400 ? conn.getInputStream() : conn.getErrorStream(), StandardCharsets.UTF_8))) {
-
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line);
-            }
-            return sb.toString();
+    private SbgPayHttpClient getHttpClient() {
+        SbgPayHttpClient client = httpClient;
+        if (client != null) {
+            return client;
         }
+
+        client = new SbgPayHttpClient(
+            objectMapper,
+            log,
+            deviceToken,
+            DEFAULT_HTTP_TIMEOUT_MS,
+            this::getString
+        );
+        httpClient = client;
+        return client;
     }
 
-    private void handleHttpError(int status, String body) throws Exception {
-        String detail = "HTTP " + status;
-        String title = null;
-
-        try {
-            JsonNode error = objectMapper.readTree(body);
-            if (error.has("detail")) {
-                detail = error.get("detail").asText();
-            } else if (error.has("title")) {
-                detail = error.get("title").asText();
-            }
-            if (error.has("title")) {
-                title = error.get("title").asText();
-            }
-        } catch (IOException ignored) {}
-
-        if (status == 401) {
-            throw new Exception(getString("error.unauthorized", "Р С›РЎв‚¬Р С‘Р В±Р С”Р В° Р В°Р Р†РЎвЂљР С•РЎР‚Р С‘Р В·Р В°РЎвЂ Р С‘Р С‘: Р С—РЎР‚Р С•Р Р†Р ВµРЎР‚РЎРЉРЎвЂљР Вµ Device-Token"));
-        } else if (status == 429) {
-            throw new Exception(getString("error.rate.limit", "Р РЋР В»Р С‘РЎв‚¬Р С”Р С•Р С Р СР Р…Р С•Р С–Р С• Р В·Р В°Р С—РЎР‚Р С•РЎРѓР С•Р Р†, Р С—Р С•Р С—РЎР‚Р С•Р В±РЎС“Р в„–РЎвЂљР Вµ Р С—Р С•Р В·Р В¶Р Вµ"));
-        } else {
-            throw new HttpStatusException(status, title, detail);
-        }
-    }
 
     private boolean isAlreadyCompletedConflict(HttpStatusException e) {
         if (e == null || e.status != 409) {
@@ -1878,18 +1797,85 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 log.trace("[SBGPay] Plugin property keys: {}", safePropertyKeys(pluginProps));
             }
 
-            baseUrl = readStringOption(serviceProps, pluginProps, "sbgpay.baseUrl", "https://sbg.amasia.io/pos", verboseDebug);
-            deviceToken = readStringOption(serviceProps, pluginProps, "sbgpay.deviceToken", null, verboseDebug);
-            language = readStringOption(serviceProps, pluginProps, "sbgpay.lang", "ru", verboseDebug);
-            currency = readStringOption(serviceProps, pluginProps, "sbgpay.currency", "UZS", verboseDebug);
+            String loadedBaseUrl = readStringOption(
+                serviceProps,
+                pluginProps,
+                "sbgpay.baseUrl",
+                "https://sbg.amasia.io/pos",
+                verboseDebug
+            );
+            String loadedDeviceToken = readStringOption(
+                serviceProps,
+                pluginProps,
+                "sbgpay.deviceToken",
+                null,
+                verboseDebug
+            );
+            String loadedLanguage = readStringOption(
+                serviceProps,
+                pluginProps,
+                "sbgpay.lang",
+                "ru",
+                verboseDebug
+            );
+            String loadedCurrency = readStringOption(
+                serviceProps,
+                pluginProps,
+                "sbgpay.currency",
+                "UZS",
+                verboseDebug
+            );
 
-            ttlSeconds = readIntOption(serviceProps, pluginProps, "sbgpay.ttlSeconds", 300, 60, 3600, verboseDebug);
-            pollDelayMs = readIntOption(serviceProps, pluginProps, "sbgpay.pollDelayMs", 2000, 500, 10000, verboseDebug);
-            pollTimeoutSeconds = readIntOption(serviceProps, pluginProps, "sbgpay.pollTimeoutSeconds", 420, 60, 7200, verboseDebug);
+            int loadedTtlSeconds = readIntOption(
+                serviceProps,
+                pluginProps,
+                "sbgpay.ttlSeconds",
+                300,
+                60,
+                3600,
+                verboseDebug
+            );
+            int loadedPollDelayMs = readIntOption(
+                serviceProps,
+                pluginProps,
+                "sbgpay.pollDelayMs",
+                2000,
+                500,
+                10000,
+                verboseDebug
+            );
+            int loadedPollTimeoutSeconds = readIntOption(
+                serviceProps,
+                pluginProps,
+                "sbgpay.pollTimeoutSeconds",
+                420,
+                60,
+                7200,
+                verboseDebug
+            );
+            boolean loadedSendReceipt = readBooleanOption(
+                serviceProps,
+                pluginProps,
+                "sbgpay.sendReceipt",
+                false,
+                verboseDebug
+            );
 
-            sendReceipt = readBooleanOption(serviceProps, pluginProps, "sbgpay.sendReceipt", false, verboseDebug);
+            SbgPayConfiguration loadedConfig = new SbgPayConfiguration(
+                loadedBaseUrl,
+                loadedDeviceToken,
+                loadedLanguage,
+                loadedCurrency,
+                loadedTtlSeconds,
+                new SbgPayConfiguration.PollingSettings(
+                    loadedPollDelayMs,
+                    loadedPollTimeoutSeconds
+                ),
+                loadedSendReceipt
+            );
 
-            logConfigurationIfChanged();
+            applyConfiguration(loadedConfig);
+            logConfigurationIfChanged(loadedConfig);
         } catch (Exception e) {
             log.error("[SBGPay] Failed to load configuration", e);
         }
@@ -2022,15 +2008,21 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         return true;
     }
 
-    private void logConfigurationIfChanged() {
-        String snapshot = "baseUrl=" + rawForLog(baseUrl)
-            + ", lang=" + rawForLog(language)
-            + ", currency=" + rawForLog(currency)
-            + ", ttl=" + ttlSeconds
-            + ", pollDelay=" + pollDelayMs
-            + ", pollTimeout=" + pollTimeoutSeconds
-            + ", sendReceipt=" + sendReceipt;
+    private void applyConfiguration(SbgPayConfiguration config) {
+        baseUrl = config.getBaseUrl();
+        deviceToken = config.getDeviceToken();
+        language = config.getLanguage();
+        currency = config.getCurrency();
+        ttlSeconds = config.getTtlSeconds();
+        pollDelayMs = config.getPollDelayMs();
+        pollTimeoutSeconds = config.getPollTimeoutSeconds();
+        sendReceipt = config.isSendReceipt();
 
+        httpClient = null;
+    }
+
+    private void logConfigurationIfChanged(SbgPayConfiguration config) {
+        String snapshot = config.snapshot();
         if (!snapshot.equals(lastLoggedConfigSnapshot)) {
             lastLoggedConfigSnapshot = snapshot;
             log.debug("[SBGPay] Config: {}", snapshot);
