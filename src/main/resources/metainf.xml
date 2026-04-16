@@ -55,6 +55,13 @@
                      minValue="60" 
                      maxValue="7200" 
                      default-value="420"/>
+
+            <!-- Длительность показа loyalty QR на дисплее покупателя -->
+            <Integer key="sbgpay.loyaltyDisplaySeconds"
+                     localeKey="option.loyaltyDisplaySeconds"
+                     minValue="5"
+                     maxValue="300"
+                     default-value="30"/>
             
             <!-- Отправлять детали чека (receipt.items) -->
             <Boolean key="sbgpay.sendReceipt" 
@@ -114,6 +121,67 @@
                            visible="true"
                            key="sbgpay.refundStatus"
                            localeKey="field.refundStatus"/>
+
+            <!-- Processing data from status.processingData -->
+            <PersistedField exportable="true"
+                           visible="true"
+                           key="sbgpay.processing.terminalId"
+                           localeKey="field.processing.terminalId"/>
+
+            <PersistedField exportable="true"
+                           visible="true"
+                           key="sbgpay.processing.merchantId"
+                           localeKey="field.processing.merchantId"/>
+
+            <PersistedField exportable="true"
+                           visible="true"
+                           key="sbgpay.processing.rrn"
+                           localeKey="field.processing.rrn"/>
+
+            <PersistedField exportable="true"
+                           visible="true"
+                           key="sbgpay.processing.stan"
+                           localeKey="field.processing.stan"/>
+
+            <PersistedField exportable="true"
+                           visible="true"
+                           key="sbgpay.processing.maskedPan"
+                           localeKey="field.processing.maskedPan"/>
+
+            <PersistedField exportable="true"
+                           visible="true"
+                           key="sbgpay.processing.localTransactionTime"
+                           localeKey="field.processing.localTransactionTime"/>
+
+            <PersistedField exportable="true"
+                           visible="true"
+                           key="sbgpay.processing.merchantName"
+                           localeKey="field.processing.merchantName"/>
+
+            <PersistedField exportable="true"
+                           visible="true"
+                           key="sbgpay.processing.merchantAddress"
+                           localeKey="field.processing.merchantAddress"/>
+
+            <PersistedField exportable="true"
+                           visible="true"
+                           key="sbgpay.processing.transactionNumber"
+                           localeKey="field.processing.transactionNumber"/>
+
+            <PersistedField exportable="true"
+                           visible="true"
+                           key="sbgpay.processing.partnerName"
+                           localeKey="field.processing.partnerName"/>
+
+            <PersistedField exportable="true"
+                           visible="true"
+                           key="sbgpay.processing.partnerPaymentId"
+                           localeKey="field.processing.partnerPaymentId"/>
+
+            <PersistedField exportable="true"
+                           visible="true"
+                           key="sbgpay.processing.userPhoneNumber"
+                           localeKey="field.processing.userPhoneNumber"/>
 
         </PaymentPlugin>
     </ExternalService>

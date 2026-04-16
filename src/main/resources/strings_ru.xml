@@ -17,6 +17,7 @@
     <entry key="option.ttlSeconds">Время жизни платежа (сек.)</entry>
     <entry key="option.pollDelayMs">Интервал опроса статуса (мс)</entry>
     <entry key="option.pollTimeoutSeconds">Таймаут ожидания оплаты (сек.)</entry>
+    <entry key="option.loyaltyDisplaySeconds">Длительность показа loyalty QR (сек.)</entry>
     <entry key="option.sendReceipt">Отправлять детали чека в API</entry>
 
     <!-- Сохраняемые поля платежа -->
@@ -29,6 +30,18 @@
     <entry key="field.refundId">ID возврата</entry>
     <entry key="field.refundCode">Код возврата</entry>
     <entry key="field.refundStatus">Статус возврата</entry>
+    <entry key="field.processing.terminalId">ID терминала</entry>
+    <entry key="field.processing.merchantId">ID мерчанта</entry>
+    <entry key="field.processing.rrn">RRN</entry>
+    <entry key="field.processing.stan">STAN</entry>
+    <entry key="field.processing.maskedPan">Маскированный PAN</entry>
+    <entry key="field.processing.localTransactionTime">Локальное время транзакции</entry>
+    <entry key="field.processing.merchantName">Название мерчанта</entry>
+    <entry key="field.processing.merchantAddress">Адрес мерчанта</entry>
+    <entry key="field.processing.transactionNumber">Номер транзакции</entry>
+    <entry key="field.processing.partnerName">Название партнера</entry>
+    <entry key="field.processing.partnerPaymentId">ID платежа партнера</entry>
+    <entry key="field.processing.userPhoneNumber">Телефон пользователя</entry>
 
     <!-- ==================== -->
     <!-- Строки для плагина   -->
@@ -61,6 +74,8 @@
     <entry key="payment.success">Оплата успешна!</entry>
     <entry key="error.timeout">Время ожидания оплаты истекло</entry>
     <entry key="error.payment.failed">Оплата не выполнена: </entry>
+    <entry key="loyalty.title">Бонус от SBG Pay</entry>
+    <entry key="loyalty.default.text">Ваш купон доступен по QR-коду.</entry>
 
     <!-- Возврат -->
     <entry key="refund.creating">Создание возврата...</entry>

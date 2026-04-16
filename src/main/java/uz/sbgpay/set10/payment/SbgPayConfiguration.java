@@ -19,6 +19,8 @@ final class SbgPayConfiguration {
     private final PollingSettings pollingSettings;
     /** Whether receipt lines should be sent in create request. */
     private final boolean sendReceipt;
+    /** Loyalty message display duration in seconds. */
+    private final int loyaltyDisplaySeconds;
 
     /**
      * Creates a new immutable configuration instance.
@@ -30,6 +32,7 @@ final class SbgPayConfiguration {
      * @param ttlSecondsValue payment TTL in seconds
      * @param pollingSettingsValue polling settings
      * @param sendReceiptValue whether receipt should be sent
+     * @param loyaltyDisplaySecondsValue loyalty display duration in seconds
      */
     SbgPayConfiguration(final String baseUrlValue,
                         final String deviceTokenValue,
@@ -37,7 +40,8 @@ final class SbgPayConfiguration {
                         final String currencyValue,
                         final int ttlSecondsValue,
                         final PollingSettings pollingSettingsValue,
-                        final boolean sendReceiptValue) {
+                        final boolean sendReceiptValue,
+                        final int loyaltyDisplaySecondsValue) {
         this.baseUrl = baseUrlValue;
         this.deviceToken = deviceTokenValue;
         this.language = languageValue;
@@ -45,6 +49,7 @@ final class SbgPayConfiguration {
         this.ttlSeconds = ttlSecondsValue;
         this.pollingSettings = pollingSettingsValue;
         this.sendReceipt = sendReceiptValue;
+        this.loyaltyDisplaySeconds = loyaltyDisplaySecondsValue;
     }
 
     /**
@@ -120,6 +125,15 @@ final class SbgPayConfiguration {
     }
 
     /**
+     * Returns loyalty display duration.
+     *
+     * @return loyalty display duration in seconds
+     */
+    int getLoyaltyDisplaySeconds() {
+        return loyaltyDisplaySeconds;
+    }
+
+    /**
      * Builds compact snapshot for debug logging.
      *
      * @return snapshot string
@@ -131,7 +145,8 @@ final class SbgPayConfiguration {
             + ", ttl=" + ttlSeconds
             + ", pollDelay=" + pollingSettings.getPollDelayMs()
             + ", pollTimeout=" + pollingSettings.getPollTimeoutSeconds()
-            + ", sendReceipt=" + sendReceipt;
+            + ", sendReceipt=" + sendReceipt
+            + ", loyaltyDisplaySeconds=" + loyaltyDisplaySeconds;
     }
 
     /**

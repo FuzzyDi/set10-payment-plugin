@@ -17,6 +17,7 @@
     <entry key="option.ttlSeconds">To'lovning amal qilish vaqti (soniya)</entry>
     <entry key="option.pollDelayMs">Status so'rovi oralig'i (ms)</entry>
     <entry key="option.pollTimeoutSeconds">To'lovni kutish taymauti (soniya)</entry>
+    <entry key="option.loyaltyDisplaySeconds">Loyalty QR ko'rsatish davomiyligi (soniya)</entry>
     <entry key="option.sendReceipt">Chek tafsilotlarini API ga yuborish</entry>
 
     <!-- Saqlanadigan maydonlar -->
@@ -29,6 +30,18 @@
     <entry key="field.refundId">Qaytarish ID</entry>
     <entry key="field.refundCode">Qaytarish kodi</entry>
     <entry key="field.refundStatus">Qaytarish holati</entry>
+    <entry key="field.processing.terminalId">Terminal ID</entry>
+    <entry key="field.processing.merchantId">Merchant ID</entry>
+    <entry key="field.processing.rrn">RRN</entry>
+    <entry key="field.processing.stan">STAN</entry>
+    <entry key="field.processing.maskedPan">Maskalangan PAN</entry>
+    <entry key="field.processing.localTransactionTime">Mahalliy tranzaksiya vaqti</entry>
+    <entry key="field.processing.merchantName">Savdogar nomi</entry>
+    <entry key="field.processing.merchantAddress">Savdogar manzili</entry>
+    <entry key="field.processing.transactionNumber">Tranzaksiya raqami</entry>
+    <entry key="field.processing.partnerName">Hamkor nomi</entry>
+    <entry key="field.processing.partnerPaymentId">Hamkor to'lovi ID</entry>
+    <entry key="field.processing.userPhoneNumber">Foydalanuvchi telefoni</entry>
 
     <!-- ==================== -->
     <!-- Plugin matnlari      -->
@@ -61,6 +74,8 @@
     <entry key="payment.success">To'lov muvaffaqiyatli!</entry>
     <entry key="error.timeout">To'lovni kutish vaqti tugadi</entry>
     <entry key="error.payment.failed">To'lov bajarilmadi: </entry>
+    <entry key="loyalty.title">SBG Pay bonusi</entry>
+    <entry key="loyalty.default.text">Kuponingiz QR-kod orqali mavjud.</entry>
 
     <!-- Qaytarish -->
     <entry key="refund.creating">Qaytarish yaratilmoqda...</entry>

@@ -4,6 +4,7 @@ build/
 out/
 *.jar
 !lib/*.jar
+!lib-mvn/**/*.jar
 
 # IDE
 .idea/

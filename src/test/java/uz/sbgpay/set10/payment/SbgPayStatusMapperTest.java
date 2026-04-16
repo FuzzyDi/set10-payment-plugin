@@ -4,8 +4,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SbgPayStatusMapperTest {
 
@@ -49,6 +52,49 @@ class SbgPayStatusMapperTest {
         assertEquals("timeout", payload.getErrorMessage());
         assertNull(payload.getPaymentCode());
         assertNull(payload.getQrPayload());
+    }
+
+    @Test
+    void mapPaymentStatus_mapsProcessingDataAndLoyalty() throws Exception {
+        JsonNode response = objectMapper.readTree("{"
+            + "\"paymentId\":\"p3\","
+            + "\"status\":\"completed\","
+            + "\"processingData\":{"
+            + "\"rrn\":\"123456789012\","
+            + "\"stan\":\"654321\""
+            + "},"
+            + "\"loyalty\":{"
+            + "\"qrPayload\":\"https://example.org\","
+            + "\"qrCodeData\":\"base64-loyalty\","
+            + "\"text\":\"Coupon text\""
+            + "}"
+            + "}");
+
+        SbgPayStatusMapper.PaymentStatusPayload payload =
+            SbgPayStatusMapper.mapPaymentStatus(response);
+
+        Map<String, String> processing = payload.getProcessingData();
+        assertEquals(2, processing.size());
+        assertEquals("123456789012", processing.get("rrn"));
+        assertEquals("654321", processing.get("stan"));
+
+        assertEquals("https://example.org", payload.getLoyaltyQrPayload());
+        assertEquals("base64-loyalty", payload.getLoyaltyQrCodeData());
+        assertEquals("Coupon text", payload.getLoyaltyText());
+    }
+
+    @Test
+    void mapPaymentStatus_returnsEmptyProcessingDataWhenAbsent() throws Exception {
+        JsonNode response = objectMapper.readTree("{"
+            + "\"paymentId\":\"p4\","
+            + "\"status\":\"pending\""
+            + "}");
+
+        SbgPayStatusMapper.PaymentStatusPayload payload =
+            SbgPayStatusMapper.mapPaymentStatus(response);
+
+        assertTrue(payload.getProcessingData().isEmpty());
+        assertNull(payload.getLoyaltyText());
     }
 }
 

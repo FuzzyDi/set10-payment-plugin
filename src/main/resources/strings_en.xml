@@ -17,6 +17,7 @@
     <entry key="option.ttlSeconds">Payment TTL (seconds)</entry>
     <entry key="option.pollDelayMs">Status poll interval (ms)</entry>
     <entry key="option.pollTimeoutSeconds">Payment timeout (seconds)</entry>
+    <entry key="option.loyaltyDisplaySeconds">Loyalty QR display duration (seconds)</entry>
     <entry key="option.sendReceipt">Send receipt details to API</entry>
 
     <!-- Persisted fields -->
@@ -29,6 +30,18 @@
     <entry key="field.refundId">Refund ID</entry>
     <entry key="field.refundCode">Refund Code</entry>
     <entry key="field.refundStatus">Refund Status</entry>
+    <entry key="field.processing.terminalId">Terminal ID</entry>
+    <entry key="field.processing.merchantId">Merchant ID</entry>
+    <entry key="field.processing.rrn">RRN</entry>
+    <entry key="field.processing.stan">STAN</entry>
+    <entry key="field.processing.maskedPan">Masked PAN</entry>
+    <entry key="field.processing.localTransactionTime">Local Transaction Time</entry>
+    <entry key="field.processing.merchantName">Merchant Name</entry>
+    <entry key="field.processing.merchantAddress">Merchant Address</entry>
+    <entry key="field.processing.transactionNumber">Transaction Number</entry>
+    <entry key="field.processing.partnerName">Partner Name</entry>
+    <entry key="field.processing.partnerPaymentId">Partner Payment ID</entry>
+    <entry key="field.processing.userPhoneNumber">User Phone Number</entry>
 
     <!-- ==================== -->
     <!-- Plugin strings       -->
@@ -61,6 +74,8 @@
     <entry key="payment.success">Payment successful!</entry>
     <entry key="error.timeout">Payment timeout</entry>
     <entry key="error.payment.failed">Payment failed: </entry>
+    <entry key="loyalty.title">SBG Pay Bonus</entry>
+    <entry key="loyalty.default.text">Your coupon is available via QR code.</entry>
 
     <!-- Refund -->
     <entry key="refund.creating">Creating refund...</entry>

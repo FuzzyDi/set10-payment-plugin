@@ -15,12 +15,13 @@ class SbgPayConfigurationTest {
             "UZS",
             120,
             new SbgPayConfiguration.PollingSettings(500, 120),
-            true
+            true,
+            45
         );
 
         String expected = "baseUrl='https://sbg.amasia.io/pos', lang='ru', "
             + "currency='UZS', ttl=120, pollDelay=500, pollTimeout=120, "
-            + "sendReceipt=true";
+            + "sendReceipt=true, loyaltyDisplaySeconds=45";
         assertEquals(expected, configuration.snapshot());
     }
 }

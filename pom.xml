@@ -21,16 +21,24 @@
         <checkstyle.plugin.version>3.3.1</checkstyle.plugin.version>
         <pmd.plugin.version>3.21.2</pmd.plugin.version>
         <spotbugs.plugin.version>4.8.6.2</spotbugs.plugin.version>
+        <set10.api.version>1.20.0</set10.api.version>
     </properties>
+
+    <repositories>
+        <!-- Local repository with Set Retail 10 SDK jars -->
+        <repository>
+            <id>set10-local-repo</id>
+            <url>file://${project.basedir}/lib-mvn</url>
+        </repository>
+    </repositories>
 
     <dependencies>
         <!-- Set Retail 10 API -->
         <dependency>
             <groupId>ru.crystals.setretail</groupId>
             <artifactId>set10pos-api</artifactId>
-            <version>1.20.0</version>
-            <scope>system</scope>
-            <systemPath>${project.basedir}/lib/set10pos-api-1.20.0.jar</systemPath>
+            <version>${set10.api.version}</version>
+            <scope>provided</scope>
         </dependency>
 
         <!-- SLF4J (provided by Set10) -->

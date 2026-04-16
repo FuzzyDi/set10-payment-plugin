@@ -92,6 +92,9 @@ import ru.crystals.pos.spi.ui.payment.SumToPayFormParameters;
 public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlugin, TransactionalRefundPlugin {
 
     private static final int DEFAULT_HTTP_TIMEOUT_MS = 30000;
+    private static final int DEFAULT_LOYALTY_DISPLAY_SECONDS = 30;
+    private static final int SLIP_LINE_MAX_LENGTH = 42;
+    private static final String PROCESSING_DATA_KEY_PREFIX = "sbgpay.processing.";
     private static final long REFUND_FAILED_RECHECK_WINDOW_MS = 20000L;
     private static final long CANCEL_RESULT_CACHE_TTL_MS = 15000L;
     private static final AtomicReference<String> LAST_CONFIG_SNAPSHOT =
@@ -139,6 +142,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     private int pollDelayMs;
     private int pollTimeoutSeconds;
     private boolean sendReceipt;
+    private int loyaltyDisplaySeconds = DEFAULT_LOYALTY_DISPLAY_SECONDS;
     private volatile SbgPayHttpClient httpClient;
 
     // ====================
@@ -251,8 +255,9 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         List<String> failedPaymentIds = new ArrayList<>();
         for (String paymentId : sbgPaymentIds) {
             try {
-                completePaymentOnServer(paymentId);
+                PaymentStatus statusBeforeComplete = completePaymentOnServer(paymentId);
                 log.info("[SBGPay] Complete successful for paymentId={}", paymentId);
+                showLoyaltyAfterFiscalization(paymentId, statusBeforeComplete);
             } catch (Exception e) {
                 log.warn("[SBGPay] Complete failed for paymentId={}: {}", paymentId, e.getMessage());
                 failedPaymentIds.add(paymentId);
@@ -585,6 +590,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         payment.getData().put("sbgpay.methodId", nullToEmpty(currentMethodId));
         payment.getData().put("sbgpay.methodName", nullToEmpty(currentMethodName));
         payment.getData().put("sbgpay.status", nullToEmpty(status.status));
+        applyProcessingDataToPayment(payment, status);
 
         log.info("[SBGPay] ===== PAYMENT FLOW COMPLETED =====");
         log.info("[SBGPay] paymentId={}, method={}, status={}, amount={}",
@@ -624,6 +630,156 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
             request.getPaymentCallback().paymentNotCompleted();
         }
     }
+
+    private void applyProcessingDataToPayment(Payment payment, PaymentStatus status) {
+        if (payment == null || status == null
+            || status.processingData == null || status.processingData.isEmpty()) {
+            return;
+        }
+
+        List<String> slips = new ArrayList<>();
+        slips.add("SBG Pay");
+        slips.add("Processing data:");
+
+        int attachedFields = 0;
+        for (Map.Entry<String, String> entry : status.processingData.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            if (!hasText(key) || !hasText(value)) {
+                continue;
+            }
+
+            String normalizedKey = key.trim();
+            String normalizedValue = value.trim();
+            payment.getData().put(
+                PROCESSING_DATA_KEY_PREFIX + normalizedKey,
+                normalizedValue
+            );
+            appendSlipLine(slips, normalizedKey + ": " + normalizedValue);
+            attachedFields++;
+        }
+
+        if (attachedFields == 0) {
+            return;
+        }
+        payment.setSlips(slips);
+        log.info("[SBGPay] Attached processingData to payment: fields={}", attachedFields);
+    }
+
+    private void appendSlipLine(List<String> slips, String value) {
+        if (slips == null || !hasText(value)) {
+            return;
+        }
+
+        String line = value.trim();
+        if (line.length() <= SLIP_LINE_MAX_LENGTH) {
+            slips.add(line);
+            return;
+        }
+
+        int from = 0;
+        while (from < line.length()) {
+            int to = Math.min(from + SLIP_LINE_MAX_LENGTH, line.length());
+            if (to < line.length()) {
+                int lastSpace = line.lastIndexOf(' ', to);
+                if (lastSpace > from) {
+                    to = lastSpace;
+                }
+            }
+            String part = line.substring(from, to).trim();
+            if (!part.isEmpty()) {
+                slips.add(part);
+            }
+            from = to;
+            while (from < line.length() && line.charAt(from) == ' ') {
+                from++;
+            }
+        }
+    }
+
+    private void showLoyaltyAfterFiscalization(String paymentId, PaymentStatus statusSnapshot) {
+        if (!hasText(paymentId)) {
+            return;
+        }
+
+        PaymentStatus sourceStatus = statusSnapshot;
+        if (!hasLoyaltyData(sourceStatus)) {
+            try {
+                sourceStatus = fetchPaymentStatus(paymentId, DEFAULT_HTTP_TIMEOUT_MS);
+            } catch (Exception e) {
+                log.debug(
+                    "[SBGPay] Loyalty display skipped: failed to fetch fresh status for paymentId={}: {}",
+                    paymentId,
+                    e.getMessage()
+                );
+                return;
+            }
+        }
+
+        if (!hasLoyaltyData(sourceStatus)) {
+            log.debug("[SBGPay] Loyalty data is empty for paymentId={}", paymentId);
+            return;
+        }
+
+        String loyaltyQr = hasText(sourceStatus.loyaltyQrPayload)
+            ? sourceStatus.loyaltyQrPayload
+            : sourceStatus.loyaltyQrCodeData;
+        showLoyaltyOnCustomerDisplay(sourceStatus.loyaltyText, loyaltyQr);
+    }
+
+    private boolean hasLoyaltyData(PaymentStatus status) {
+        return status != null && (
+            hasText(status.loyaltyText)
+                || hasText(status.loyaltyQrPayload)
+                || hasText(status.loyaltyQrCodeData)
+        );
+    }
+
+    private void showLoyaltyOnCustomerDisplay(String loyaltyText, String loyaltyQr) {
+        if (customerDisplay == null) {
+            log.debug("[SBGPay] Loyalty display skipped: CustomerDisplay not available");
+            return;
+        }
+
+        String title = getString("loyalty.title", "SBG Pay Bonus");
+        String text = hasText(loyaltyText)
+            ? loyaltyText
+            : getString("loyalty.default.text", "Ваш купон доступен по QR-коду.");
+
+        try {
+            customerDisplay.clear();
+            if (customerDisplay.canShowQr() && hasText(loyaltyQr)) {
+                CommunicationMessage message = new CommunicationMessage(
+                    null,
+                    null,
+                    title,
+                    text,
+                    loyaltyQr,
+                    null
+                );
+                message.setAutoCloseable(false);
+                customerDisplay.display(
+                    new CustomerDisplayMessage(
+                        message,
+                        Duration.ofSeconds(Math.max(1, loyaltyDisplaySeconds))
+                    )
+                );
+                log.info("[SBGPay] Loyalty QR displayed on customer display");
+                return;
+            }
+
+            StringBuilder fallback = new StringBuilder();
+            fallback.append(title).append("\n").append(text);
+            if (hasText(loyaltyQr)) {
+                fallback.append("\n").append(loyaltyQr);
+            }
+            customerDisplay.setText(fallback.toString());
+            log.info("[SBGPay] Loyalty text displayed on customer display");
+        } catch (Exception e) {
+            log.warn("[SBGPay] Failed to show loyalty on customer display", e);
+        }
+    }
+
     private void showRefundErrorAndAbort(String message, RefundRequest request) {
         clearCustomerDisplay();
         showCustomerText(message);
@@ -884,6 +1040,10 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         status.status = payload.getStatus();
         status.qrPayload = payload.getQrPayload();
         status.qrCodeData = payload.getQrCodeData();
+        status.processingData = payload.getProcessingData();
+        status.loyaltyQrPayload = payload.getLoyaltyQrPayload();
+        status.loyaltyQrCodeData = payload.getLoyaltyQrCodeData();
+        status.loyaltyText = payload.getLoyaltyText();
         status.errorMessage = payload.getErrorMessage();
 
         return status;
@@ -892,13 +1052,13 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     /**
      * POST /api/v1/payments/{id}/complete
      */
-    private void completePaymentOnServer(String paymentId) throws Exception {
+    private PaymentStatus completePaymentOnServer(String paymentId) throws Exception {
         PaymentStatus currentStatus = fetchPaymentStatus(paymentId, DEFAULT_HTTP_TIMEOUT_MS);
         String status = currentStatus.status;
 
         if ("completed".equalsIgnoreCase(status)) {
             log.info("[SBGPay] Complete skipped for paymentId={}: status already completed", paymentId);
-            return;
+            return currentStatus;
         }
         if (!"paid".equalsIgnoreCase(status)) {
             throw new Exception("Cannot complete payment in status '" + status + "'");
@@ -911,10 +1071,11 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         } catch (HttpStatusException e) {
             if (isAlreadyCompletedConflict(e)) {
                 log.info("[SBGPay] Complete is idempotent for paymentId={}: status already completed", paymentId);
-                return;
+                return currentStatus;
             }
             throw e;
         }
+        return currentStatus;
     }
 
     /**
@@ -1640,6 +1801,15 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 false,
                 verboseDebug
             );
+            int loadedLoyaltyDisplaySeconds = readIntOption(
+                serviceProps,
+                pluginProps,
+                "sbgpay.loyaltyDisplaySeconds",
+                DEFAULT_LOYALTY_DISPLAY_SECONDS,
+                5,
+                300,
+                verboseDebug
+            );
 
             SbgPayConfiguration loadedConfig = new SbgPayConfiguration(
                 loadedBaseUrl,
@@ -1651,7 +1821,8 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                     loadedPollDelayMs,
                     loadedPollTimeoutSeconds
                 ),
-                loadedSendReceipt
+                loadedSendReceipt,
+                loadedLoyaltyDisplaySeconds
             );
 
             applyConfiguration(loadedConfig);
@@ -1792,6 +1963,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         pollDelayMs = config.getPollDelayMs();
         pollTimeoutSeconds = config.getPollTimeoutSeconds();
         sendReceipt = config.isSendReceipt();
+        loyaltyDisplaySeconds = config.getLoyaltyDisplaySeconds();
 
         httpClient = null;
     }
@@ -2886,6 +3058,10 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         String status;
         String qrPayload;
         String qrCodeData;
+        Map<String, String> processingData = Collections.emptyMap();
+        String loyaltyQrPayload;
+        String loyaltyQrCodeData;
+        String loyaltyText;
         String errorMessage;
     }
 
