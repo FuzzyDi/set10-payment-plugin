@@ -18,6 +18,7 @@
     <entry key="option.pollDelayMs">Status poll interval (ms)</entry>
     <entry key="option.pollTimeoutSeconds">Payment timeout (seconds)</entry>
     <entry key="option.loyaltyDisplaySeconds">Loyalty QR display duration (seconds)</entry>
+    <entry key="option.iconVariant">Payment icon variant (light/dark/transparent/contrast)</entry>
     <entry key="option.sendReceipt">Send receipt details to API</entry>
 
     <!-- Persisted fields -->

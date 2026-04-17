@@ -5,6 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 
 import javax.swing.SwingUtilities;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.net.ConnectException;
 import java.net.NoRouteToHostException;
@@ -13,7 +16,11 @@ import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.net.URLEncoder;
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -32,6 +39,9 @@ import ru.crystals.pos.api.comm.CommunicationMessage;
 import ru.crystals.pos.api.plugin.PaymentPlugin;
 import ru.crystals.pos.api.plugin.RefundPreparationPlugin;
 import ru.crystals.pos.api.plugin.TransactionalRefundPlugin;
+import ru.crystals.pos.api.plugin.asset.AssetProvider;
+import ru.crystals.pos.api.plugin.asset.ImageAsset;
+import ru.crystals.pos.api.plugin.asset.ImageCriteria;
 import ru.crystals.pos.api.plugin.payment.Payment;
 import ru.crystals.pos.api.plugin.payment.PaymentResultData;
 import ru.crystals.pos.api.plugin.payment.RefundPreparationResult;
@@ -89,12 +99,27 @@ import ru.crystals.pos.spi.ui.payment.SumToPayFormParameters;
  * 10. Р СџР В»Р В°Р С–Р С‘Р Р… Р С•РЎвЂљР С—РЎР‚Р В°Р Р†Р В»РЎРЏР ВµРЎвЂљ Р С—Р С•Р Т‘РЎвЂљР Р†Р ВµРЎР‚Р В¶Р Т‘Р ВµР Р…Р С‘Р Вµ /complete
  */
 @POSPlugin(id = "uz.sbgpay.payment")
-public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlugin, TransactionalRefundPlugin {
+public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlugin,
+    TransactionalRefundPlugin, AssetProvider {
 
     private static final int DEFAULT_HTTP_TIMEOUT_MS = 30000;
     private static final int DEFAULT_LOYALTY_DISPLAY_SECONDS = 30;
+    private static final String DEFAULT_ICON_VARIANT = "light";
+    private static final String TOUCH_PAYMENT_TYPE_ICON_USAGE =
+        "TOUCH_PAYMENT_TYPE_ICON";
+    private static final int TOUCH_ICON_WIDTH_PX = 64;
+    private static final int TOUCH_ICON_HEIGHT_PX = 64;
+    private static final String PNG_DATA_URI_PREFIX = "data:image/png;base64,";
     private static final int SLIP_LINE_MAX_LENGTH = 42;
     private static final String PROCESSING_DATA_KEY_PREFIX = "sbgpay.processing.";
+    private static final Map<String, String> ICON_VARIANT_RESOURCE_MAP =
+        createIconVariantResourceMap();
+    private static final ConcurrentHashMap<String, String> ICON_DATA_URI_CACHE =
+        new ConcurrentHashMap<>();
+    private static final DateTimeFormatter PROCESSING_TIME_INPUT_FORMAT =
+        DateTimeFormatter.ofPattern("yyMMddHHmmss");
+    private static final DateTimeFormatter PROCESSING_TIME_OUTPUT_FORMAT =
+        DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss");
     private static final long REFUND_FAILED_RECHECK_WINDOW_MS = 20000L;
     private static final long CANCEL_RESULT_CACHE_TTL_MS = 15000L;
     private static final AtomicReference<String> LAST_CONFIG_SNAPSHOT =
@@ -143,6 +168,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     private int pollTimeoutSeconds;
     private boolean sendReceipt;
     private int loyaltyDisplaySeconds = DEFAULT_LOYALTY_DISPLAY_SECONDS;
+    private String iconVariant = DEFAULT_ICON_VARIANT;
     private volatile SbgPayHttpClient httpClient;
 
     // ====================
@@ -166,6 +192,33 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
     public boolean isAvailable() {
         loadConfiguration(false);
         return hasRequiredConfiguration();
+    }
+
+    @Override
+    public List<ImageAsset> getImages(ImageCriteria criteria) {
+        loadConfiguration(false);
+
+        if (criteria == null) {
+            return Collections.emptyList();
+        }
+
+        if (!TOUCH_PAYMENT_TYPE_ICON_USAGE.equals(criteria.getImageUsage())) {
+            return Collections.emptyList();
+        }
+
+        String variant = normalizeIconVariant(iconVariant);
+        String dataUri = getOrLoadIconDataUri(variant);
+        if (!hasText(dataUri)) {
+            logWarnSafe(
+                "[SBGPay] Touch icon is unavailable for variant '{}'",
+                variant
+            );
+            return Collections.emptyList();
+        }
+
+        return Collections.singletonList(
+            new ImageAsset(TOUCH_ICON_WIDTH_PX, TOUCH_ICON_HEIGHT_PX, dataUri)
+        );
     }
 
     @Override
@@ -637,10 +690,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
             return;
         }
 
-        List<String> slips = new ArrayList<>();
-        slips.add("SBG Pay");
-        slips.add("Processing data:");
-
+        Map<String, String> normalizedProcessingData = new LinkedHashMap<>();
         int attachedFields = 0;
         for (Map.Entry<String, String> entry : status.processingData.entrySet()) {
             String key = entry.getKey();
@@ -655,25 +705,135 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 PROCESSING_DATA_KEY_PREFIX + normalizedKey,
                 normalizedValue
             );
-            appendSlipLine(slips, normalizedKey + ": " + normalizedValue);
+            normalizedProcessingData.put(normalizedKey, normalizedValue);
             attachedFields++;
         }
 
         if (attachedFields == 0) {
             return;
         }
-        payment.setSlips(slips);
+
+        StringBuilder slipText = new StringBuilder();
+        appendWrappedSlipLine(
+            slipText,
+            getString("slip.processing.header", "Данные процессинга")
+        );
+        for (String key : getOrderedProcessingKeys(normalizedProcessingData)) {
+            String label = getProcessingSlipFieldLabel(key);
+            String printableValue = formatProcessingSlipValue(
+                key,
+                normalizedProcessingData.get(key)
+            );
+            appendWrappedSlipLine(slipText, label + ": " + printableValue);
+        }
+
+        payment.getSlips().add(slipText.toString());
         log.info("[SBGPay] Attached processingData to payment: fields={}", attachedFields);
     }
 
-    private void appendSlipLine(List<String> slips, String value) {
-        if (slips == null || !hasText(value)) {
+    private List<String> getOrderedProcessingKeys(Map<String, String> data) {
+        List<String> orderedKeys = new ArrayList<>();
+        Collections.addAll(
+            orderedKeys,
+            "terminalId",
+            "merchantId",
+            "rrn",
+            "stan",
+            "maskedPan",
+            "localTransactionTime",
+            "merchantName",
+            "merchantAddress",
+            "transactionNumber",
+            "partnerName",
+            "partnerPaymentId",
+            "userPhoneNumber"
+        );
+
+        List<String> result = new ArrayList<>();
+        for (String key : orderedKeys) {
+            if (data.containsKey(key)) {
+                result.add(key);
+            }
+        }
+        for (String key : data.keySet()) {
+            if (!result.contains(key)) {
+                result.add(key);
+            }
+        }
+        return result;
+    }
+
+    private String getProcessingSlipFieldLabel(String key) {
+        if ("terminalId".equals(key)) {
+            return getString("slip.processing.terminalId", "Терминал");
+        }
+        if ("merchantId".equals(key)) {
+            return getString("slip.processing.merchantId", "ID мерчанта");
+        }
+        if ("rrn".equals(key)) {
+            return getString("slip.processing.rrn", "RRN");
+        }
+        if ("stan".equals(key)) {
+            return getString("slip.processing.stan", "STAN");
+        }
+        if ("maskedPan".equals(key)) {
+            return getString("slip.processing.maskedPan", "Карта");
+        }
+        if ("localTransactionTime".equals(key)) {
+            return getString("slip.processing.localTransactionTime", "Время операции");
+        }
+        if ("merchantName".equals(key)) {
+            return getString("slip.processing.merchantName", "Название мерчанта");
+        }
+        if ("merchantAddress".equals(key)) {
+            return getString("slip.processing.merchantAddress", "Адрес мерчанта");
+        }
+        if ("transactionNumber".equals(key)) {
+            return getString("slip.processing.transactionNumber", "Номер транзакции");
+        }
+        if ("partnerName".equals(key)) {
+            return getString("slip.processing.partnerName", "Партнер");
+        }
+        if ("partnerPaymentId".equals(key)) {
+            return getString("slip.processing.partnerPaymentId", "ID платежа партнера");
+        }
+        if ("userPhoneNumber".equals(key)) {
+            return getString("slip.processing.userPhoneNumber", "Телефон клиента");
+        }
+        return key;
+    }
+
+    private String formatProcessingSlipValue(String key, String value) {
+        if (!hasText(value)) {
+            return "";
+        }
+        if (!"localTransactionTime".equals(key)) {
+            return value;
+        }
+
+        String rawValue = value.trim();
+        try {
+            LocalDateTime parsed = LocalDateTime.parse(
+                rawValue,
+                PROCESSING_TIME_INPUT_FORMAT
+            );
+            return parsed.format(PROCESSING_TIME_OUTPUT_FORMAT);
+        } catch (DateTimeParseException ex) {
+            return rawValue;
+        }
+    }
+
+    private void appendWrappedSlipLine(StringBuilder slipText, String value) {
+        if (slipText == null || !hasText(value)) {
             return;
         }
 
         String line = value.trim();
         if (line.length() <= SLIP_LINE_MAX_LENGTH) {
-            slips.add(line);
+            if (slipText.length() > 0) {
+                slipText.append("\n");
+            }
+            slipText.append(line);
             return;
         }
 
@@ -688,7 +848,10 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
             }
             String part = line.substring(from, to).trim();
             if (!part.isEmpty()) {
-                slips.add(part);
+                if (slipText.length() > 0) {
+                    slipText.append("\n");
+                }
+                slipText.append(part);
             }
             from = to;
             while (from < line.length() && line.charAt(from) == ' ') {
@@ -791,6 +954,26 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 () -> request.getPaymentCallback().paymentNotCompleted());
         } catch (IncorrectStateException e) {
             request.getPaymentCallback().paymentNotCompleted();
+        }
+    }
+
+    private void showTransactionalRefundErrorAndAbort(
+        String message,
+        TransactionalRefundRequest request,
+        TransactionalRefundResult result
+    ) {
+        clearCustomerDisplay();
+        showCustomerText(message);
+
+        log.warn("[SBGPay] Transactional refund aborted: {}", message);
+
+        try {
+            uiForms.showMessageForm(
+                message,
+                () -> request.getOperationCallback().operationNotCompleted(result)
+            );
+        } catch (IncorrectStateException e) {
+            request.getOperationCallback().operationNotCompleted(result);
         }
     }
 
@@ -1810,6 +1993,13 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                 300,
                 verboseDebug
             );
+            String loadedIconVariant = readStringOption(
+                serviceProps,
+                pluginProps,
+                "sbgpay.iconVariant",
+                DEFAULT_ICON_VARIANT,
+                verboseDebug
+            );
 
             SbgPayConfiguration loadedConfig = new SbgPayConfiguration(
                 loadedBaseUrl,
@@ -1822,7 +2012,8 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
                     loadedPollTimeoutSeconds
                 ),
                 loadedSendReceipt,
-                loadedLoyaltyDisplaySeconds
+                loadedLoyaltyDisplaySeconds,
+                loadedIconVariant
             );
 
             applyConfiguration(loadedConfig);
@@ -1947,6 +2138,111 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         return resolvedValue;
     }
 
+    private String normalizeIconVariant(String rawVariant) {
+        if (!hasText(rawVariant)) {
+            return DEFAULT_ICON_VARIANT;
+        }
+
+        String normalized = rawVariant.trim().toLowerCase(Locale.ROOT);
+        if (!ICON_VARIANT_RESOURCE_MAP.containsKey(normalized)) {
+            logWarnSafe(
+                "[SBGPay] Unknown icon variant '{}', fallback to '{}'. "
+                    + "Allowed variants: {}",
+                rawVariant,
+                DEFAULT_ICON_VARIANT,
+                ICON_VARIANT_RESOURCE_MAP.keySet()
+            );
+            return DEFAULT_ICON_VARIANT;
+        }
+
+        return normalized;
+    }
+
+    private String getOrLoadIconDataUri(String rawVariant) {
+        String variant = normalizeIconVariant(rawVariant);
+
+        String cachedDataUri = ICON_DATA_URI_CACHE.get(variant);
+        if (cachedDataUri != null) {
+            return cachedDataUri;
+        }
+
+        String resourcePath = ICON_VARIANT_RESOURCE_MAP.get(variant);
+        String loadedDataUri = loadPngDataUriFromClasspath(resourcePath);
+        if (!hasText(loadedDataUri) && !DEFAULT_ICON_VARIANT.equals(variant)) {
+            return getOrLoadIconDataUri(DEFAULT_ICON_VARIANT);
+        }
+
+        if (hasText(loadedDataUri)) {
+            ICON_DATA_URI_CACHE.put(variant, loadedDataUri);
+        }
+        return loadedDataUri;
+    }
+
+    private String loadPngDataUriFromClasspath(String resourcePath) {
+        if (!hasText(resourcePath)) {
+            return null;
+        }
+
+        try (InputStream inputStream =
+                 SbgPayPaymentPlugin.class.getResourceAsStream(resourcePath)) {
+            if (inputStream == null) {
+                logWarnSafe(
+                    "[SBGPay] Icon resource not found in classpath: {}",
+                    resourcePath
+                );
+                return null;
+            }
+
+            byte[] bytes = readAllBytes(inputStream);
+            if (bytes == null || bytes.length == 0) {
+                logWarnSafe(
+                    "[SBGPay] Icon resource is empty: {}",
+                    resourcePath
+                );
+                return null;
+            }
+            return PNG_DATA_URI_PREFIX + Base64.getEncoder().encodeToString(bytes);
+        } catch (IOException e) {
+            logWarnSafe(
+                "[SBGPay] Failed to load icon resource '{}': {}",
+                resourcePath,
+                e.getMessage()
+            );
+            return null;
+        }
+    }
+
+    private byte[] readAllBytes(InputStream inputStream) throws IOException {
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        byte[] buffer = new byte[4096];
+        int readBytes;
+        while ((readBytes = inputStream.read(buffer)) != -1) {
+            outputStream.write(buffer, 0, readBytes);
+        }
+        return outputStream.toByteArray();
+    }
+
+    private static Map<String, String> createIconVariantResourceMap() {
+        Map<String, String> resources = new LinkedHashMap<>();
+        resources.put(
+            "light",
+            "/icons/sbgpay-touch-icon-brand-light.png"
+        );
+        resources.put(
+            "dark",
+            "/icons/sbgpay-touch-icon-brand-dark.png"
+        );
+        resources.put(
+            "transparent",
+            "/icons/sbgpay-touch-icon-brand-transparent.png"
+        );
+        resources.put(
+            "contrast",
+            "/icons/sbgpay-touch-icon-brand-contrast.png"
+        );
+        return Collections.unmodifiableMap(resources);
+    }
+
     private boolean hasRequiredConfiguration() {
         String unavailableReason = getUnavailableConfigurationReason();
         boolean available = unavailableReason == null;
@@ -1964,6 +2260,7 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         pollTimeoutSeconds = config.getPollTimeoutSeconds();
         sendReceipt = config.isSendReceipt();
         loyaltyDisplaySeconds = config.getLoyaltyDisplaySeconds();
+        iconVariant = config.getIconVariant();
 
         httpClient = null;
     }
@@ -2161,7 +2458,8 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
         if (resBundle != null) {
             try {
                 String value = resBundle.getString(key);
-                if (value != null && !value.isEmpty()) {
+                String missingMarker = "!" + key + "!";
+                if (value != null && !value.trim().isEmpty() && !missingMarker.equals(value.trim())) {
                     return value;
                 }
             } catch (Exception ignored) {}
@@ -2988,9 +3286,20 @@ public class SbgPayPaymentPlugin implements PaymentPlugin, RefundPreparationPlug
 
                     PaymentResultData errorData = new PaymentResultData();
                     errorData.getData().put("sbgpay.refundStatus", "refund_failed");
+                    String errorMessage = plugin.resolveErrorMessage(
+                        e,
+                        "refund.failed",
+                        "Возврат не выполнен: "
+                    );
+                    if (plugin.hasText(e.getMessage())) {
+                        errorData.getData().put("sbgpay.refundError", e.getMessage());
+                    }
 
-                    request.getOperationCallback().operationNotCompleted(
-                        new TransactionalRefundResult(errorData));
+                    plugin.showTransactionalRefundErrorAndAbort(
+                        errorMessage,
+                        request,
+                        new TransactionalRefundResult(errorData)
+                    );
                 }
             }, "sbgpay-transactional-refund").start();
         }

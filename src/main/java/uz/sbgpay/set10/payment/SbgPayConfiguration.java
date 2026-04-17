@@ -21,6 +21,8 @@ final class SbgPayConfiguration {
     private final boolean sendReceipt;
     /** Loyalty message display duration in seconds. */
     private final int loyaltyDisplaySeconds;
+    /** Variant of payment type touch icon. */
+    private final String iconVariant;
 
     /**
      * Creates a new immutable configuration instance.
@@ -33,6 +35,7 @@ final class SbgPayConfiguration {
      * @param pollingSettingsValue polling settings
      * @param sendReceiptValue whether receipt should be sent
      * @param loyaltyDisplaySecondsValue loyalty display duration in seconds
+     * @param iconVariantValue icon variant name
      */
     SbgPayConfiguration(final String baseUrlValue,
                         final String deviceTokenValue,
@@ -41,7 +44,8 @@ final class SbgPayConfiguration {
                         final int ttlSecondsValue,
                         final PollingSettings pollingSettingsValue,
                         final boolean sendReceiptValue,
-                        final int loyaltyDisplaySecondsValue) {
+                        final int loyaltyDisplaySecondsValue,
+                        final String iconVariantValue) {
         this.baseUrl = baseUrlValue;
         this.deviceToken = deviceTokenValue;
         this.language = languageValue;
@@ -50,6 +54,7 @@ final class SbgPayConfiguration {
         this.pollingSettings = pollingSettingsValue;
         this.sendReceipt = sendReceiptValue;
         this.loyaltyDisplaySeconds = loyaltyDisplaySecondsValue;
+        this.iconVariant = iconVariantValue;
     }
 
     /**
@@ -134,6 +139,15 @@ final class SbgPayConfiguration {
     }
 
     /**
+     * Returns icon variant.
+     *
+     * @return icon variant
+     */
+    String getIconVariant() {
+        return iconVariant;
+    }
+
+    /**
      * Builds compact snapshot for debug logging.
      *
      * @return snapshot string
@@ -146,7 +160,8 @@ final class SbgPayConfiguration {
             + ", pollDelay=" + pollingSettings.getPollDelayMs()
             + ", pollTimeout=" + pollingSettings.getPollTimeoutSeconds()
             + ", sendReceipt=" + sendReceipt
-            + ", loyaltyDisplaySeconds=" + loyaltyDisplaySeconds;
+            + ", loyaltyDisplaySeconds=" + loyaltyDisplaySeconds
+            + ", iconVariant=" + raw(iconVariant);
     }
 
     /**

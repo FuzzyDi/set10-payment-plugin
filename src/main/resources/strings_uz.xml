@@ -18,6 +18,7 @@
     <entry key="option.pollDelayMs">Status so'rovi oralig'i (ms)</entry>
     <entry key="option.pollTimeoutSeconds">To'lovni kutish taymauti (soniya)</entry>
     <entry key="option.loyaltyDisplaySeconds">Loyalty QR ko'rsatish davomiyligi (soniya)</entry>
+    <entry key="option.iconVariant">To'lov ikonkasining varianti (light/dark/transparent/contrast)</entry>
     <entry key="option.sendReceipt">Chek tafsilotlarini API ga yuborish</entry>
 
     <!-- Saqlanadigan maydonlar -->

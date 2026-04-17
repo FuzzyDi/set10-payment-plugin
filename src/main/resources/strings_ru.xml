@@ -18,6 +18,7 @@
     <entry key="option.pollDelayMs">Интервал опроса статуса (мс)</entry>
     <entry key="option.pollTimeoutSeconds">Таймаут ожидания оплаты (сек.)</entry>
     <entry key="option.loyaltyDisplaySeconds">Длительность показа loyalty QR (сек.)</entry>
+    <entry key="option.iconVariant">Вариант иконки оплаты (light/dark/transparent/contrast)</entry>
     <entry key="option.sendReceipt">Отправлять детали чека в API</entry>
 
     <!-- Сохраняемые поля платежа -->
